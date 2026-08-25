@@ -8,11 +8,20 @@ public static class IdentitySeeder
 
     public static async Task SeedRolesAsync(IServiceProvider services)
     {
-        var roleManager = services.GetRequiredService<RoleManager<IdentityRole>>();
-        foreach (var role in Roles)
-        {
-            if (!await roleManager.RoleExistsAsync(role))
-                await roleManager.CreateAsync(new IdentityRole(role));
-        }
+var roleManager = services.GetRequiredService<RoleManager<IdentityRole>>();
+foreach (var role in Roles)
+{
+    if (await roleManager.RoleExistsAsync(role))
+        continue;
+
+    var result = await roleManager.CreateAsync(new IdentityRole(role));
+    if (!result.Succeeded)
+    {
+        // In case another instance created the role concurrently
+        if (await roleManager.RoleExistsAsync(role))
+            continue;
+
+        var errors = string.Join("; ", result.Errors.Select(e => $"{e.Code}: {e.Description}"));
+        throw new InvalidOperationException($"Failed to create role '{role}': {errors}");
     }
 }
