@@ -15,6 +15,10 @@
 
 Closes #
 
+## Trello card
+
+<!-- Link to the Trello card this PR addresses -->
+
 ## Checklist
 
 - [ ] Builds locally (`dotnet build`)
