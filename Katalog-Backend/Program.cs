@@ -36,6 +36,9 @@ app.UseAuthorization();
 
 using (var scope = app.Services.CreateScope())
 {
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDBContext>();
+    await db.Database.MigrateAsync();
+
     await IdentitySeeder.SeedRolesAsync(scope.ServiceProvider);
 }
 
