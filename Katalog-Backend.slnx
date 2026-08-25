@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Katalog-Backend/Katalog-Backend.csproj" />
+  <Project Path="Katalog-Backend.Tests/Katalog-Backend.Tests.csproj" />
+</Solution>
