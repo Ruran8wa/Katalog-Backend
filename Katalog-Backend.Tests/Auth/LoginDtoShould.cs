@@ -39,7 +39,7 @@ public class LoginDtoShould
         Assert.That(isValid, Is.False);
     }
 
-    public bool ValidateLoginDto(LoginDto loginDto)
+    private bool ValidateLoginDto(LoginDto loginDto)
     {
         var context = new ValidationContext(loginDto);
         var result =  new List<ValidationResult>();
