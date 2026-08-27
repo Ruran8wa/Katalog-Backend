@@ -1,6 +1,5 @@
 using Katalog_Backend.DTO;
 using Katalog_Backend.Services.Interfaces;
-using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Katalog_Backend.Controllers;
