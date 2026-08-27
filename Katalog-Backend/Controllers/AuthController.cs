@@ -25,7 +25,14 @@ public class AuthController(IAuthService authService) : ControllerBase
     [HttpPost("login")]
     public async Task<ActionResult<AuthResponseDto>> Login([FromBody] LoginDto dto)
     {
-        var login = await authService.LoginAsync(dto);
-        return Ok(login);
+        try
+        {
+            var login = await authService.LoginAsync(dto);
+            return Ok(login);
+        }
+        catch (Katalog_Backend.Exceptions.InvalidCredentialsException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 }
