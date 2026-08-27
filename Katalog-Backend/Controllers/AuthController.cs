@@ -38,4 +38,5 @@ public class AuthController(IAuthService authService) : ControllerBase
         {
             return StatusCode(423, new { message = ex.Message });
         }
+    }
 }

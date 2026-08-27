@@ -50,24 +50,30 @@ builder.Services.AddAuthentication(options =>
         ValidateAudience = true,
         ValidateIssuerSigningKey = true,
         ValidateLifetime = true,
-        ValidIssuer = builder.Configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Jwt:Issuer is not configured."),
-        ValidAudience = builder.Configuration["Jwt:Audience"] ?? throw new InvalidOperationException("Jwt:Audience is not configured."),
+        ValidIssuer = builder.Configuration["Jwt:Issuer"] ??
+                      throw new InvalidOperationException("Jwt:Issuer is not configured."),
+        ValidAudience = builder.Configuration["Jwt:Audience"] ??
+                        throw new InvalidOperationException("Jwt:Audience is not configured."),
         IssuerSigningKey = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("Jwt:Key is not configured.")))
+            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"] ??
+                                   throw new InvalidOperationException("Jwt:Key is not configured.")))
+    };
 });
 
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
+app.UseExceptionHandler();
+app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-using (var scope = app.Services.CreateScope())
+if (app.Environment.IsDevelopment())
 {
+    using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDBContext>();
     await db.Database.MigrateAsync();
-
     await IdentitySeeder.SeedRolesAsync(scope.ServiceProvider);
 }
 
