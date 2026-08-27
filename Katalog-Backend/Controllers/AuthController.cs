@@ -11,8 +11,15 @@ public class AuthController(IAuthService authService) : ControllerBase
     [HttpPost]
     public async Task<ActionResult<AuthResponseDto>> Register([FromBody] RegisterDto dto)
     {
-        var register = await authService.RegisterAsync(dto);
-        return Ok(register);
+        try
+        {
+            var register = await authService.RegisterAsync(dto);
+            return Ok(register);
+        }
+        catch (Katalog_Backend.Exceptions.RegistrationException ex)
+        {
+            return BadRequest(new { message = ex.Message, errors = ex.Errors });
+        }
     }
 
     [HttpPost]
