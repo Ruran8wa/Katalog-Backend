@@ -6,32 +6,31 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace Katalog_Backend.Services;
 
-public class TokenService: ITokenService
+public class TokenService(IConfiguration config) : ITokenService
 {
-    private readonly IConfiguration _config;
-
-    public TokenService(IConfiguration config)
-    {
-        _config = config;
-    }
-
-    public string CreateToken(string userId, string userEmail, string userRole)
+    public string CreateToken(string userId, string userEmail, IList<string> userRoles)
     {
         var claims = new List<Claim>
         {
-            new Claim(ClaimTypes.Name, userId),
-            new Claim(ClaimTypes.Email, userEmail),
-            new Claim(ClaimTypes.Role, userRole)
+            new Claim(ClaimTypes.NameIdentifier, userId),
+            new Claim(JwtRegisteredClaimNames.Sub, userId),
+            new Claim(JwtRegisteredClaimNames.Email, userEmail),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
+        claims.AddRange(userRoles.Select(role => new Claim(ClaimTypes.Role, role)));
+
+        var jwtKey = config["Jwt:Key"] ?? throw new InvalidOperationException("Jwt:Key is not configured.");
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
+        var expireMinutes = double.TryParse(config["Jwt:ExpireTime"], out var mins) ? mins : 60;
+
         var token = new JwtSecurityToken(
-            issuer: _config["Jwt:Issuer"],
-            audience: _config["Jwt:Audience"],
+            issuer: config["Jwt:Issuer"],
+            audience: config["Jwt:Audience"],
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(Convert.ToDouble(_config["Jwt:ExpireTime"])),
+            expires: DateTime.UtcNow.AddMinutes(expireMinutes),
             signingCredentials: creds
         );
         
