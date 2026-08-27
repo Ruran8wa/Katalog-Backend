@@ -20,7 +20,9 @@ public class TokenService(IConfiguration config) : ITokenService
 
         claims.AddRange(userRoles.Select(role => new Claim(ClaimTypes.Role, role)));
 
-        var jwtKey = config["Jwt:Key"] ?? throw new InvalidOperationException("Jwt:Key is not configured.");
+        var jwtKey = config["Jwt:Key"];
+        if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.StartsWith("CHANGE_ME", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Jwt:Key must be set via user secrets or environment variables.");
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
