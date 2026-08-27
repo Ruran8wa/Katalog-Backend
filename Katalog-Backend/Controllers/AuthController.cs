@@ -8,7 +8,7 @@ namespace Katalog_Backend.Controllers;
 [ApiController]
 public class AuthController(IAuthService authService) : ControllerBase
 {
-    [HttpPost]
+    [HttpPost("register")]
     public async Task<ActionResult<AuthResponseDto>> Register([FromBody] RegisterDto dto)
     {
         try
