@@ -32,7 +32,10 @@ public class AuthController(IAuthService authService) : ControllerBase
         }
         catch (Katalog_Backend.Exceptions.InvalidCredentialsException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            return Unauthorized(new { message = ex.Message });
         }
-    }
+        catch (Katalog_Backend.Exceptions.AccountLockedException ex)
+        {
+            return StatusCode(423, new { message = ex.Message });
+        }
 }
