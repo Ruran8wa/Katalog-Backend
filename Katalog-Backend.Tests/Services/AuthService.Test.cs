@@ -5,8 +5,6 @@ using Katalog_Backend.Services;
 using Katalog_Backend.Services.Interfaces;
 using Katalog_Backend.Tests.Helpers;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting.Internal;
 using Moq;
 using NUnit.Framework;
 
