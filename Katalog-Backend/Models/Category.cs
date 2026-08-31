@@ -3,7 +3,7 @@ namespace Katalog_Backend.Models;
 public class Category
 {
     public  int Id { get; set; }
-    public string CategoryName {get; set;}
+    public string CategoryName { get; set; } = string.Empty;
     public int? CategoryParentId { get; set; }
     
     public Category Parent { get; set; }
