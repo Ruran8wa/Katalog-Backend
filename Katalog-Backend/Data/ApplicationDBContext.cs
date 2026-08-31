@@ -2,9 +2,9 @@ using Katalog_Backend.Models;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
-namespace Katalog_Backend;
+namespace Katalog_Backend.Data;
 
-public class ApplicationDBContext(DbContextOptions<ApplicationDBContext> options)
+public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
     : IdentityDbContext<ApplicationUser>(options)
 {
     public DbSet<Category> Categories { get; set; }
