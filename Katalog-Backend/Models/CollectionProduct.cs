@@ -1,6 +1,6 @@
 namespace Katalog_Backend.Models;
 
-public class CollectionProducts
+public class CollectionProduct
 {
     public int CollectionId { get; set; }
     public int ProductId { get; set; }
