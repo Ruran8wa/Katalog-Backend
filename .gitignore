@@ -14,3 +14,6 @@ obj/
 
 ## Local secrets
 .env
+appsettings.Development.json
+appsettings.*.Development.json
+appsettings.Local.json
