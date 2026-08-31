@@ -7,6 +7,6 @@ public class Category
     public int? CategoryParentId { get; set; }
     
     public Category? Parent { get; set; }
-    public ICollection<Category> Children { get; set; }
+    public ICollection<Category>? Children { get; set; }
     public ICollection<Product> Products { get; set; }
 }
