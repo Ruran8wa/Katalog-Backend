@@ -10,5 +10,5 @@ public interface ICategoryRepo
     public Task<CategoryResponseDto> GetCategoryById(int id);
     public Task<List<CategoryResponseDto>> GetCategoriesByParentId(int parentId);
     public Task DeleteCategory(int categoryId);
-    public Task UpdateCategory(UpdateCategoryDto category);
+    public Task<CategoryResponseDto> UpdateCategory(UpdateCategoryDto category);
 }

@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Katalog_Backend</RootNamespace>
+    <UserSecretsId>6ba86967-c8a3-4fff-a66b-b9d17d21934b</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
