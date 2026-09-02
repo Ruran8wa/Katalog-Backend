@@ -6,35 +6,56 @@ namespace Katalog_Backend.Services;
 
 public class CategoryService(ICategoryRepo categoryRepo) : ICategoryService
 {
-    private ICategoryRepo _categoryRepo = categoryRepo;
+    private readonly ICategoryRepo _categoryRepo = categoryRepo;
 
-    public Task<CategoryResponseDto> CreateCategory(CreateCategoryDto dto)
+    public async Task<CategoryResponseDto> CreateCategory(CreateCategoryDto dto)
     {
-        throw new NotImplementedException();
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            throw new ArgumentException("Category name is required.");
+
+        if (dto.CategoryParentId.HasValue)
+        {
+            var parentExists = await _categoryRepo.CategoryExists(dto.CategoryParentId.Value);
+            if (!parentExists)
+            {
+                throw new KeyNotFoundException($"Parent category with id {dto.CategoryParentId.Value} was not found.");
+            }
+        }
+
+        return await _categoryRepo.CreateCategory(dto);
     }
 
-    public Task<List<CategoryResponseDto>> GetAllCategories()
+    public async Task<List<CategoryResponseDto>> GetAllCategories()
     {
-        throw new NotImplementedException();
+        return await _categoryRepo.GetAllCategories();
     }
 
-    public Task<CategoryResponseDto> GetCategoryById(int id)
+    public async Task<CategoryResponseDto> GetCategoryById(int id)
     {
-        throw new NotImplementedException();
+        return await _categoryRepo.GetCategoryById(id);
     }
 
-    public Task<List<CategoryResponseDto>> GetCategoriesByParentId(int parentId)
+    public async Task<List<CategoryResponseDto>> GetCategoriesByParentId(int parentId)
     {
-        throw new NotImplementedException();
+        var parentExists = await _categoryRepo.CategoryExists(parentId);
+        if (!parentExists)
+        {
+            throw new KeyNotFoundException($"Parent category with id {parentId} was not found.");
+        }
+
+        return await _categoryRepo.GetCategoriesByParentId(parentId);
     }
 
-    public Task<CategoryResponseDto> UpdateCategory(UpdateCategoryDto dto)
+    public async Task<CategoryResponseDto> UpdateCategory(UpdateCategoryDto dto)
     {
-        throw new NotImplementedException();
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            throw new ArgumentException("Category name is required.");
+
+        return await _categoryRepo.UpdateCategory(dto);
     }
 
-    public Task<CategoryResponseDto> DeleteCategory(int id)
+    public async Task DeleteCategory(int id)
     {
-        throw new NotImplementedException();
+        await _categoryRepo.DeleteCategory(id);
     }
 }

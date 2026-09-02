@@ -29,7 +29,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .HasForeignKey(c => c.CategoryParentId)
             .OnDelete(DeleteBehavior.Restrict);
         
-        builder.Entity<Variant>().HasIndex(v => v.SKU).IsUnique();
+        builder.Entity<Variant>().HasIndex(v => v.Sku).IsUnique();
         builder.Entity<Variant>()
             .HasOne(v => v.Product)
             .WithMany(p => p.Variants)
