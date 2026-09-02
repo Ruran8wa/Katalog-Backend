@@ -9,6 +9,6 @@ public class Order
     public int PriceAtPurchase { get; set; }
     public DateTime CreatedAt { get; set; }
     
-    public ApplicationUser User { get; set; }
-    public Variant Variant { get; set; }
+    public required ApplicationUser User { get; set; }
+    public required Variant Variant { get; set; }
 }
