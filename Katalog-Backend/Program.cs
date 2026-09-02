@@ -1,6 +1,8 @@
 using System.Text;
-using Katalog_Backend;
+using Katalog_Backend.Data;
 using Katalog_Backend.Models;
+using Katalog_Backend.Repositories;
+using Katalog_Backend.Repositories.Interfaces;
 using Katalog_Backend.Services;
 using Katalog_Backend.Services.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -39,8 +41,10 @@ builder.Services.AddSwaggerGen(options =>
 
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<ICategoryRepo, CategoryRepo>();
+builder.Services.AddScoped<ICategoryService, CategoryService>();
 
-builder.Services.AddDbContext<ApplicationDBContext>(options =>
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
@@ -58,7 +62,7 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 
     options.User.RequireUniqueEmail = true;
 })
-    .AddEntityFrameworkStores<ApplicationDBContext>()
+    .AddEntityFrameworkStores<ApplicationDbContext>()
     .AddDefaultTokenProviders();
 
 builder.Services.AddAuthentication(options =>

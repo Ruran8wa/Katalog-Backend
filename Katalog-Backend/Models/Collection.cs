@@ -1,9 +1,12 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace Katalog_Backend.Models;
 
 public class Collection
 {
     public int Id { get; set; }
-    public string Name { get; set; }
+    [MaxLength(100)]
+    public string Name { get; set; } = string.Empty;
 
-    public ICollection<CollectionProducts> CollectionProducts { get; set; } = new List<CollectionProducts>();
+    public ICollection<CollectionProduct> CollectionProducts { get; set; } = new List<CollectionProduct>();
 }
