@@ -14,9 +14,30 @@ public class CloudinaryStorageService : IFileStorageService
 
     public CloudinaryStorageService(IConfiguration configuration)
     {
-        var cloudName = configuration["Cloudinary:CloudName"];
-        var apiKey = configuration["Cloudinary:ApiKey"];
-        var apiSecret = configuration["Cloudinary:ApiSecret"];
+        var cloudinaryUrl = configuration["CLOUDINARY_URL"] 
+            ?? Environment.GetEnvironmentVariable("CLOUDINARY_URL");
+
+        if (!string.IsNullOrEmpty(cloudinaryUrl))
+        {
+            _cloudinary = new Cloudinary(cloudinaryUrl);
+            _cloudinary.Api.Secure = true;
+            return;
+        }
+
+        var cloudName = configuration["Cloudinary:CloudName"] 
+            ?? configuration["CLOUDINARY_CLOUD_NAME"] 
+            ?? Environment.GetEnvironmentVariable("CLOUDINARY_CLOUD_NAME") 
+            ?? Environment.GetEnvironmentVariable("Cloudinary__CloudName");
+
+        var apiKey = configuration["Cloudinary:ApiKey"] 
+            ?? configuration["CLOUDINARY_API_KEY"] 
+            ?? Environment.GetEnvironmentVariable("CLOUDINARY_API_KEY") 
+            ?? Environment.GetEnvironmentVariable("Cloudinary__ApiKey");
+
+        var apiSecret = configuration["Cloudinary:ApiSecret"] 
+            ?? configuration["CLOUDINARY_API_SECRET"] 
+            ?? Environment.GetEnvironmentVariable("CLOUDINARY_API_SECRET") 
+            ?? Environment.GetEnvironmentVariable("Cloudinary__ApiSecret");
 
         if (!string.IsNullOrEmpty(cloudName) && !string.IsNullOrEmpty(apiKey) && !string.IsNullOrEmpty(apiSecret))
         {
