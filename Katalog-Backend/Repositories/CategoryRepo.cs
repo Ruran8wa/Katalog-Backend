@@ -29,6 +29,7 @@ public class CategoryRepo : ICategoryRepo
     {
         var allCategories = await _context.Categories
             .AsNoTracking()
+            .Include(c => c.Children)
             .ToListAsync();
         return allCategories.Select(c => c.ToCategoryResponseDto()).ToList();
     }
