@@ -13,6 +13,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<Product> Products { get; set; }
     public DbSet<Order> Orders { get; set; }
     public DbSet<Variant> Variants { get; set; }
+    public DbSet<VariantImage> VariantImages { get; set; }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -36,5 +37,11 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .HasForeignKey(v => v.ProductId)
             .IsRequired()
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<VariantImage>()
+            .HasOne(vi => vi.Variant)
+            .WithMany(v => v.Images)
+            .HasForeignKey(vi => vi.VariantId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
