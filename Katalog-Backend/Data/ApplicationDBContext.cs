@@ -22,7 +22,6 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         builder.Entity<CollectionProduct>().HasOne(x => x.Collection).WithMany(x => x.CollectionProducts).HasForeignKey(x => x.CollectionId);
         builder.Entity<CollectionProduct>().HasOne(x => x.Product).WithMany(x => x.CollectionProducts).HasForeignKey(x => x.ProductId);
         
-        builder.Entity<Category>().HasIndex(x => new {x.CategoryParentId, x.CategoryName}).IsUnique();
         builder.Entity<Category>()
             .HasOne(c => c.Parent)
             .WithMany(c => c.Children)
