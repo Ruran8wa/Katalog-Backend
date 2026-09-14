@@ -1,6 +1,7 @@
 using Katalog_Backend.DTO;
 using Katalog_Backend.Exceptions;
 using Katalog_Backend.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Katalog_Backend.Controllers;
@@ -31,6 +32,7 @@ public class ProductsController(IProductService productService) : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<ProductResponseDto>> Create([FromBody] CreateProductDto dto)
     {
         if (!ModelState.IsValid)
@@ -43,6 +45,7 @@ public class ProductsController(IProductService productService) : ControllerBase
     }
 
     [HttpPut("{id:int}")]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<ProductResponseDto>> Update(int id, [FromBody] UpdateProductDto dto)
     {
         if (!ModelState.IsValid)
@@ -62,6 +65,7 @@ public class ProductsController(IProductService productService) : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Delete(int id)
     {
         try
