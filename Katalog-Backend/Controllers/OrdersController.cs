@@ -2,10 +2,12 @@ using System.Security.Claims;
 using Katalog_Backend.DTO;
 using Katalog_Backend.Exceptions;
 using Katalog_Backend.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Katalog_Backend.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class OrdersController : ControllerBase
@@ -20,7 +22,11 @@ public class OrdersController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<OrderResponseDto>>> GetAll([FromQuery] string? userId)
     {
-        var orders = await _orderService.GetAllOrdersAsync(userId);
+        var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var isAdmin = User.IsInRole("Admin");
+        var effectiveUserId = isAdmin ? userId : currentUserId;
+
+        var orders = await _orderService.GetAllOrdersAsync(effectiveUserId);
         return Ok(orders);
     }
 
@@ -30,6 +36,12 @@ public class OrdersController : ControllerBase
         try
         {
             var order = await _orderService.GetOrderByIdAsync(id);
+            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!User.IsInRole("Admin") && order.UserId != currentUserId)
+            {
+                return Forbid();
+            }
+
             return Ok(order);
         }
         catch (OrderNotFoundException ex)
@@ -49,7 +61,10 @@ public class OrdersController : ControllerBase
         try
         {
             var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            var order = await _orderService.CreateOrderAsync(dto, currentUserId);
+            var isAdmin = User.IsInRole("Admin");
+            var effectiveUserId = isAdmin && !string.IsNullOrWhiteSpace(dto.UserId) ? dto.UserId : currentUserId;
+
+            var order = await _orderService.CreateOrderAsync(dto, effectiveUserId);
             return CreatedAtAction(nameof(GetById), new { id = order.Id }, order);
         }
         catch (ArgumentException ex)
@@ -80,6 +95,13 @@ public class OrdersController : ControllerBase
 
         try
         {
+            var existing = await _orderService.GetOrderByIdAsync(id);
+            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!User.IsInRole("Admin") && existing.UserId != currentUserId)
+            {
+                return Forbid();
+            }
+
             var updated = await _orderService.UpdateOrderQuantityAsync(id, dto.Quantity);
             return Ok(updated);
         }
@@ -106,6 +128,13 @@ public class OrdersController : ControllerBase
     {
         try
         {
+            var existing = await _orderService.GetOrderByIdAsync(id);
+            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!User.IsInRole("Admin") && existing.UserId != currentUserId)
+            {
+                return Forbid();
+            }
+
             await _orderService.DeleteOrderAsync(id);
             return NoContent();
         }

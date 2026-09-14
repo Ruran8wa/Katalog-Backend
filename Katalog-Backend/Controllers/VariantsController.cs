@@ -1,6 +1,7 @@
 using Katalog_Backend.DTO;
 using Katalog_Backend.Exceptions;
 using Katalog_Backend.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -46,6 +47,7 @@ public class VariantsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<VariantResponseDto>> Create([FromBody] CreateVariantDto createDto)
     {
         try
@@ -64,6 +66,7 @@ public class VariantsController : ControllerBase
     }
 
     [HttpPut("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<VariantResponseDto>> Update(int id, [FromBody] UpdateVariantDto updateDto)
     {
         try
@@ -82,6 +85,7 @@ public class VariantsController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Delete(int id)
     {
         try
@@ -96,6 +100,7 @@ public class VariantsController : ControllerBase
     }
 
     [HttpPost("{id}/images")]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<VariantImageResponseDto>> UploadImage(
         int id,
         IFormFile file,
@@ -122,6 +127,7 @@ public class VariantsController : ControllerBase
     }
 
     [HttpDelete("{id}/images/{imageId}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> DeleteImage(int id, int imageId)
     {
         try
@@ -136,6 +142,7 @@ public class VariantsController : ControllerBase
     }
 
     [HttpPut("{id}/images/{imageId}/primary")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> SetPrimaryImage(int id, int imageId)
     {
         try

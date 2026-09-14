@@ -1,5 +1,6 @@
 using Katalog_Backend.DTO;
 using Katalog_Backend.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Katalog_Backend.Controllers;
@@ -16,6 +17,7 @@ public class CategoryController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<CategoryResponseDto>> CreateCategory([FromBody] CreateCategoryDto categoryDto)
     {
         try
@@ -69,6 +71,7 @@ public class CategoryController : ControllerBase
     }
 
     [HttpPut]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<CategoryResponseDto>> UpdateCategory([FromBody] UpdateCategoryDto categoryDto)
     {
         try
@@ -87,6 +90,7 @@ public class CategoryController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> DeleteCategory(int id)
     {
         try
