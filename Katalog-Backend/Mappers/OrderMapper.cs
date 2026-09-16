@@ -20,6 +20,7 @@ public static class OrderMapper
             Quantity = order.Quantity,
             PriceAtPurchase = order.PriceAtPurchase,
             TotalPrice = order.Quantity * order.PriceAtPurchase,
+            Status = order.Status,
             CreatedAt = order.CreatedAt
         };
     }

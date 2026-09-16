@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Katalog_Backend.Enums;
 
 namespace Katalog_Backend.DTO;
 
@@ -35,5 +36,6 @@ public class OrderResponseDto
     public int Quantity { get; set; }
     public int PriceAtPurchase { get; set; }
     public int TotalPrice { get; set; }
+    public OrderStatus Status { get; set; }
     public DateTime CreatedAt { get; set; }
 }

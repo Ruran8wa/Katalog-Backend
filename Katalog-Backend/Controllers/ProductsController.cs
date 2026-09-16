@@ -11,10 +11,15 @@ namespace Katalog_Backend.Controllers;
 public class ProductsController(IProductService productService) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<ProductResponseDto>>> GetAll()
+    public async Task<ActionResult<PagedResult<ProductResponseDto>>> GetAll([FromQuery] ProductQueryDto query)
     {
-        var products = await productService.GetAllProductsAsync();
-        return Ok(products);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        var result = await productService.GetProductsAsync(query);
+        return Ok(result);
     }
 
     [HttpGet("{id:int}")]
