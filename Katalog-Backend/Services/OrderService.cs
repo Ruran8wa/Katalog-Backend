@@ -1,4 +1,7 @@
+using System.Text.Json;
 using Katalog_Backend.DTO;
+using Katalog_Backend.Enums;
+using Katalog_Backend.Events;
 using Katalog_Backend.Exceptions;
 using Katalog_Backend.Mappers;
 using Katalog_Backend.Models;
@@ -73,11 +76,25 @@ public class OrderService : IOrderService
 
         var unitPrice = variant.PriceOverride ?? variant.Product?.BasePrice ?? 0;
 
-        variant.Quantity -= dto.Quantity;
-        await _variantRepository.UpdateAsync(variant);
-
         var order = dto.ToEntity(userId, unitPrice);
-        var created = await _orderRepository.CreateAsync(order);
+        order.Status = OrderStatus.Pending;
+
+        var created = await _orderRepository.CreateWithOutboxAsync(order, savedOrder =>
+        {
+            var @event = new OrderPlacedEvent(
+                savedOrder.Id,
+                savedOrder.UserId,
+                savedOrder.VariantId,
+                savedOrder.Quantity,
+                savedOrder.CreatedAt
+            );
+
+            return new OutboxMessage
+            {
+                EventType = nameof(OrderPlacedEvent),
+                Payload = JsonSerializer.Serialize(@event)
+            };
+        });
 
         return created.ToDto();
     }
