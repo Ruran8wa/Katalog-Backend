@@ -3,9 +3,9 @@ name: katalog-backend
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 env:
   DOTNET_VERSION: "10.0.x"
@@ -22,7 +22,7 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-          cache: true
+          # cache: true
 
       - name: Restore dependencies
         run: dotnet restore Katalog-Backend.slnx
