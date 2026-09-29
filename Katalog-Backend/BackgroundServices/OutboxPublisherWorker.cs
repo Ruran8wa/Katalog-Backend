@@ -13,6 +13,8 @@ public class OutboxPublisherWorker : BackgroundService
     private ServiceBusClient? _client;
     private ServiceBusSender? _sender;
 
+    // channel background services
+    
     public OutboxPublisherWorker(
         IServiceScopeFactory scopeFactory,
         IOptions<AzureServiceBusOptions> options,
