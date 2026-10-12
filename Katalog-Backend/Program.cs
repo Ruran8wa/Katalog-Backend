@@ -65,8 +65,24 @@ builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IOutboxRepository, OutboxRepository>();
 
 builder.Services.Configure<AzureServiceBusOptions>(builder.Configuration.GetSection(AzureServiceBusOptions.SectionName));
-builder.Services.AddHostedService<OutboxPublisherWorker>();
-builder.Services.AddHostedService<OrderStockDecrementConsumer>();
+
+var consumerEnabled = builder.Configuration.GetValue<bool?>("Consumer:Enabled")
+    ?? builder.Configuration.GetValue<bool?>("CONSUMER_ENABLED")
+    ?? true;
+
+var outboxPublisherEnabled = builder.Configuration.GetValue<bool?>("OutboxPublisher:Enabled")
+    ?? builder.Configuration.GetValue<bool?>("OUTBOX_PUBLISHER_ENABLED")
+    ?? true;
+
+if (outboxPublisherEnabled)
+{
+    builder.Services.AddHostedService<OutboxPublisherWorker>();
+}
+
+if (consumerEnabled)
+{
+    builder.Services.AddHostedService<OrderStockDecrementConsumer>();
+}
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -119,6 +135,12 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
+
+var appLogger = app.Services.GetRequiredService<ILogger<Program>>();
+appLogger.LogInformation(
+    "Background service roles: OutboxPublisher={OutboxStatus}, Consumer={ConsumerStatus}",
+    outboxPublisherEnabled ? "Enabled" : "Disabled",
+    consumerEnabled ? "Enabled" : "Disabled");
 
 app.UseExceptionHandler();
 

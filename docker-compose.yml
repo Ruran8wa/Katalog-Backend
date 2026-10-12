@@ -42,6 +42,28 @@ services:
       AzureServiceBus__ConnectionString: "${AZURE_SERVICE_BUS_CONNECTION_STRING:-${AzureServiceBus__ConnectionString:-}}"
       AzureServiceBus__TopicName: "${AZURE_SERVICE_BUS_TOPIC:-${AzureServiceBus__TopicName:-order-placed-topic}}"
       AzureServiceBus__SubscriptionName: "${AZURE_SERVICE_BUS_SUBSCRIPTION:-${AzureServiceBus__SubscriptionName:-order-stock-worker-sub}}"
+      # Background Services: Disabled on API so it only serves HTTP traffic
+      Consumer__Enabled: "false"
+      OutboxPublisher__Enabled: "false"
+    restart: unless-stopped
+
+  consumer:
+    build: .
+    container_name: katalog-consumer
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"
+      # Database
+      ConnectionStrings__DefaultConnection: "Server=sqlserver,1433;Database=${DB_NAME:-KatalogDb};User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=True;"
+      # Azure Service Bus
+      AzureServiceBus__ConnectionString: "${AZURE_SERVICE_BUS_CONNECTION_STRING:-${AzureServiceBus__ConnectionString:-}}"
+      AzureServiceBus__TopicName: "${AZURE_SERVICE_BUS_TOPIC:-${AzureServiceBus__TopicName:-order-placed-topic}}"
+      AzureServiceBus__SubscriptionName: "${AZURE_SERVICE_BUS_SUBSCRIPTION:-${AzureServiceBus__SubscriptionName:-order-stock-worker-sub}}"
+      # Background Services: Enabled on worker
+      Consumer__Enabled: "true"
+      OutboxPublisher__Enabled: "true"
     restart: unless-stopped
 
 volumes:
