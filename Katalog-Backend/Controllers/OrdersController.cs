@@ -65,7 +65,7 @@ public class OrdersController : ControllerBase
             var effectiveUserId = isAdmin && !string.IsNullOrWhiteSpace(dto.UserId) ? dto.UserId : currentUserId;
 
             var order = await _orderService.CreateOrderAsync(dto, effectiveUserId);
-            return CreatedAtAction(nameof(GetById), new { id = order.Id }, order);
+            return AcceptedAtAction(nameof(GetById), new { id = order.Id }, order);
         }
         catch (ArgumentException ex)
         {
