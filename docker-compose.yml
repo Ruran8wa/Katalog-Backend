@@ -11,7 +11,7 @@ services:
     volumes:
       - sqlserver_data:/var/opt/mssql
     healthcheck:
-      test: ["/opt/mssql-tools18/bin/sqlcmd", "-S", "localhost", "-U", "sa", "-P", "${SA_PASSWORD}", "-C", "-Q", "SELECT 1"]
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -C -Q 'SELECT 1' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -30,18 +30,18 @@ services:
       # Database
       ConnectionStrings__DefaultConnection: "Server=sqlserver,1433;Database=${DB_NAME:-KatalogDb};User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=True;"
       # JWT
-      Jwt__Key: "${JWT_KEY}"
-      Jwt__Issuer: "${JWT_ISSUER:-KatalogBackend}"
-      Jwt__Audience: "${JWT_AUDIENCE:-KatalogClient}"
-      Jwt__ExpireTime: "${JWT_EXPIRE_TIME:-60}"
+      Jwt__Key: "${JWT_KEY:-${Jwt__Key:-}}"
+      Jwt__Issuer: "${JWT_ISSUER:-${Jwt__Issuer:-KatalogBackend}}"
+      Jwt__Audience: "${JWT_AUDIENCE:-${Jwt__Audience:-KatalogClient}}"
+      Jwt__ExpireTime: "${JWT_EXPIRE_TIME:-${Jwt__ExpireTime:-60}}"
       # Cloudinary
-      Cloudinary__CloudName: "${CLOUDINARY_CLOUD_NAME}"
-      Cloudinary__ApiKey: "${CLOUDINARY_API_KEY}"
-      Cloudinary__ApiSecret: "${CLOUDINARY_API_SECRET}"
+      Cloudinary__CloudName: "${CLOUDINARY_CLOUD_NAME:-${Cloudinary__CloudName:-}}"
+      Cloudinary__ApiKey: "${CLOUDINARY_API_KEY:-${Cloudinary__ApiKey:-}}"
+      Cloudinary__ApiSecret: "${CLOUDINARY_API_SECRET:-${Cloudinary__ApiSecret:-}}"
       # Azure Service Bus
-      AzureServiceBus__ConnectionString: "${AZURE_SERVICE_BUS_CONNECTION_STRING}"
-      AzureServiceBus__TopicName: "${AZURE_SERVICE_BUS_TOPIC:-orders}"
-      AzureServiceBus__SubscriptionName: "${AZURE_SERVICE_BUS_SUBSCRIPTION:-background_sub}"
+      AzureServiceBus__ConnectionString: "${AZURE_SERVICE_BUS_CONNECTION_STRING:-${AzureServiceBus__ConnectionString:-}}"
+      AzureServiceBus__TopicName: "${AZURE_SERVICE_BUS_TOPIC:-${AzureServiceBus__TopicName:-order-placed-topic}}"
+      AzureServiceBus__SubscriptionName: "${AZURE_SERVICE_BUS_SUBSCRIPTION:-${AzureServiceBus__SubscriptionName:-order-stock-worker-sub}}"
     restart: unless-stopped
 
 volumes:

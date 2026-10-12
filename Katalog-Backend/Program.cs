@@ -3,6 +3,7 @@ using dotenv.net;
 using Katalog_Backend.BackgroundServices;
 using Katalog_Backend.Configuration;
 using Katalog_Backend.Data;
+using Katalog_Backend.HealthChecks;
 using Katalog_Backend.Middleware;
 using Katalog_Backend.Models;
 using Katalog_Backend.Repositories;
@@ -10,6 +11,7 @@ using Katalog_Backend.Repositories.Interfaces;
 using Katalog_Backend.Services;
 using Katalog_Backend.Services.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -69,6 +71,10 @@ builder.Services.AddHostedService<OrderStockDecrementConsumer>();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"])
+    .AddCheck<ServiceBusHealthCheck>("servicebus", tags: ["ready"]);
+
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 {
     options.Password.RequireDigit = true;
@@ -118,6 +124,18 @@ app.UseExceptionHandler();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = _ => false,
+    ResponseWriter = HealthCheckResponseWriter.WriteResponse
+});
+
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready"),
+    ResponseWriter = HealthCheckResponseWriter.WriteResponse
+});
 
 app.MapControllers();
 app.UseHttpsRedirection();
