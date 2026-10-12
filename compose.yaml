@@ -1,0 +1,115 @@
+name: katalog
+
+services:
+  # ── SQL Server Database ─────────────────────────────────────────────────────
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: katalog-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${SA_PASSWORD:-YourStrong!Passw0rd}"
+      MSSQL_PID: "Developer"
+    ports:
+      - "${DB_PORT:-1433}:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Azure Service Bus Emulator ──────────────────────────────────────────────
+  servicebus-emulator:
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    container_name: katalog-servicebus-emulator
+    volumes:
+      - "./emulator/Config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro"
+    ports:
+      - "5672:5672"
+      - "5300:5300"
+    environment:
+      SQL_SERVER: sqledge
+      MSSQL_SA_PASSWORD: "${SA_PASSWORD:-YourStrong!Passw0rd}"
+      ACCEPT_EULA: "Y"
+      SQL_WAIT_INTERVAL: 10
+    depends_on:
+      sqledge:
+        condition: service_healthy
+    restart: unless-stopped
+
+  sqledge:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    container_name: katalog-sqledge
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${SA_PASSWORD:-YourStrong!Passw0rd}"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Web API ─────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: katalog-api
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      servicebus-emulator:
+        condition: service_started
+    ports:
+      - "${APP_PORT:-5297}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"
+      # Database
+      ConnectionStrings__DefaultConnection: "Server=sqlserver,1433;Database=${DB_NAME:-KatalogDb};User Id=sa;Password=${SA_PASSWORD:-YourStrong!Passw0rd};TrustServerCertificate=True;"
+      # JWT Authentication
+      Jwt__Key: "${JWT_KEY:-${Jwt__Key:-CHANGE_ME_use_at_least_32_chars_of_random_secret}}"
+      Jwt__Issuer: "${JWT_ISSUER:-${Jwt__Issuer:-KatalogBackend}}"
+      Jwt__Audience: "${JWT_AUDIENCE:-${Jwt__Audience:-KatalogClient}}"
+      Jwt__ExpireTime: "${JWT_EXPIRE_TIME:-${Jwt__ExpireTime:-60}}"
+      # Cloudinary
+      Cloudinary__CloudName: "${CLOUDINARY_CLOUD_NAME:-${Cloudinary__CloudName:-}}"
+      Cloudinary__ApiKey: "${CLOUDINARY_API_KEY:-${Cloudinary__ApiKey:-}}"
+      Cloudinary__ApiSecret: "${CLOUDINARY_API_SECRET:-${Cloudinary__ApiSecret:-}}"
+      # Azure Service Bus Emulator
+      AzureServiceBus__ConnectionString: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+      AzureServiceBus__TopicName: "${AZURE_SERVICE_BUS_TOPIC:-order-placed-topic}"
+      AzureServiceBus__SubscriptionName: "${AZURE_SERVICE_BUS_SUBSCRIPTION:-order-stock-worker-sub}"
+      # Background Services: Disabled on API process
+      Consumer__Enabled: "false"
+      OutboxPublisher__Enabled: "false"
+    restart: unless-stopped
+
+  # ── Order Consumer Background Worker ────────────────────────────────────────
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: katalog-consumer
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      servicebus-emulator:
+        condition: service_started
+    environment:
+      ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"
+      # Database
+      ConnectionStrings__DefaultConnection: "Server=sqlserver,1433;Database=${DB_NAME:-KatalogDb};User Id=sa;Password=${SA_PASSWORD:-YourStrong!Passw0rd};TrustServerCertificate=True;"
+      # Azure Service Bus Emulator
+      AzureServiceBus__ConnectionString: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+      AzureServiceBus__TopicName: "${AZURE_SERVICE_BUS_TOPIC:-order-placed-topic}"
+      AzureServiceBus__SubscriptionName: "${AZURE_SERVICE_BUS_SUBSCRIPTION:-order-stock-worker-sub}"
+      # Background Services: Enabled on consumer process
+      Consumer__Enabled: "true"
+      OutboxPublisher__Enabled: "true"
+    restart: unless-stopped
+
+volumes:
+  sqlserver_data:
