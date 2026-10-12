@@ -70,7 +70,7 @@ public class CategoryController : ControllerBase
         }
     }
 
-    [HttpPut]
+    [HttpPut()]
     [Authorize(Roles = "Admin")]
     public async Task<ActionResult<CategoryResponseDto>> UpdateCategory([FromBody] UpdateCategoryDto categoryDto)
     {
