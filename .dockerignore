@@ -1,0 +1,35 @@
+# Build outputs and temporary artifacts
+**/bin/
+**/obj/
+
+# Source control
+.git/
+.gitignore
+
+# Test results and coverage reports
+[Tt]est[Rr]esults/
+**/[Tt]est[Rr]esults/
+*.trx
+*.coverage
+*.coveragexml
+
+# Local secrets and environment configuration
+.env
+.env.*
+!.env.example
+**/appsettings.Development.json
+**/appsettings.*.Development.json
+**/appsettings.Local.json
+*.user
+
+# IDE and editor settings
+.vs/
+.idea/
+.vscode/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Documentation and markdown
+*.md
