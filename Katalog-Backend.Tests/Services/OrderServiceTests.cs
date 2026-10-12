@@ -1,4 +1,5 @@
 using Katalog_Backend.DTO;
+using Katalog_Backend.Enums;
 using Katalog_Backend.Exceptions;
 using Katalog_Backend.Models;
 using Katalog_Backend.Repositories.Interfaces;
@@ -179,11 +180,11 @@ public class OrderServiceTests
 
         Assert.ThrowsAsync<InsufficientStockException>(async () => await _orderService.CreateOrderAsync(dto));
         _variantRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Variant>()), Times.Never);
-        _orderRepositoryMock.Verify(r => r.CreateAsync(It.IsAny<Order>()), Times.Never);
+        _orderRepositoryMock.Verify(r => r.CreateWithOutboxAsync(It.IsAny<Order>(), It.IsAny<Func<Order, OutboxMessage>>()), Times.Never);
     }
 
     [Test]
-    public async Task CreateOrderAsync_ValidOrder_DeductsStockAndCreatesOrder()
+    public async Task CreateOrderAsync_ValidOrder_CreatesOrderWithPendingStatusAndOutbox()
     {
         var user = CreateDummyUser("user-1");
         var variant = CreateDummyVariant(1, quantity: 10, priceOverride: 150);
@@ -191,17 +192,23 @@ public class OrderServiceTests
 
         _userManagerMock.Setup(m => m.FindByIdAsync("user-1")).ReturnsAsync(user);
         _variantRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(variant);
-        _orderRepositoryMock.Setup(r => r.CreateAsync(It.IsAny<Order>()))
-            .ReturnsAsync((Order o) => { o.Id = 1; o.User = user; o.Variant = variant; return o; });
+        _orderRepositoryMock.Setup(r => r.CreateWithOutboxAsync(It.IsAny<Order>(), It.IsAny<Func<Order, OutboxMessage>>()))
+            .ReturnsAsync((Order o, Func<Order, OutboxMessage> factory) =>
+            {
+                o.Id = 1;
+                o.User = user;
+                o.Variant = variant;
+                return o;
+            });
 
         var result = await _orderService.CreateOrderAsync(dto);
 
         Assert.That(result, Is.Not.Null);
-        Assert.That(variant.Quantity, Is.EqualTo(7));
+        Assert.That(result.Status, Is.EqualTo(OrderStatus.Pending));
         Assert.That(result.PriceAtPurchase, Is.EqualTo(150));
         Assert.That(result.TotalPrice, Is.EqualTo(450));
-        _variantRepositoryMock.Verify(r => r.UpdateAsync(It.Is<Variant>(v => v.Quantity == 7)), Times.Once);
-        _orderRepositoryMock.Verify(r => r.CreateAsync(It.IsAny<Order>()), Times.Once);
+        _variantRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Variant>()), Times.Never);
+        _orderRepositoryMock.Verify(r => r.CreateWithOutboxAsync(It.IsAny<Order>(), It.IsAny<Func<Order, OutboxMessage>>()), Times.Once);
     }
 
     [Test]
@@ -213,8 +220,14 @@ public class OrderServiceTests
 
         _userManagerMock.Setup(m => m.FindByIdAsync("user-1")).ReturnsAsync(user);
         _variantRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(variant);
-        _orderRepositoryMock.Setup(r => r.CreateAsync(It.IsAny<Order>()))
-            .ReturnsAsync((Order o) => { o.Id = 1; o.User = user; o.Variant = variant; return o; });
+        _orderRepositoryMock.Setup(r => r.CreateWithOutboxAsync(It.IsAny<Order>(), It.IsAny<Func<Order, OutboxMessage>>()))
+            .ReturnsAsync((Order o, Func<Order, OutboxMessage> factory) =>
+            {
+                o.Id = 1;
+                o.User = user;
+                o.Variant = variant;
+                return o;
+            });
 
         var result = await _orderService.CreateOrderAsync(dto, "user-1");
 
