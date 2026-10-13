@@ -15,7 +15,7 @@ public class OrderStockDecrementConsumer : BackgroundService
     private readonly AzureServiceBusOptions _options;
     private readonly ILogger<OrderStockDecrementConsumer> _logger;
     private ServiceBusClient? _client;
-    private ServiceBusProcessor? _processor;
+    private ServiceBusSessionProcessor? _processor;
 
     public OrderStockDecrementConsumer(
         IServiceScopeFactory scopeFactory,
@@ -34,20 +34,21 @@ public class OrderStockDecrementConsumer : BackgroundService
             try
             {
                 _client = new ServiceBusClient(_options.ConnectionString);
-                _processor = _client.CreateProcessor(_options.TopicName, _options.SubscriptionName, new ServiceBusProcessorOptions
+                _processor = _client.CreateSessionProcessor(_options.QueueName, new ServiceBusSessionProcessorOptions
                 {
                     AutoCompleteMessages = false,
-                    MaxConcurrentCalls = 1
+                    MaxConcurrentSessions = 1,
+                    MaxConcurrentCallsPerSession = 1,
+                    SessionIdleTimeout = TimeSpan.FromSeconds(1)
                 });
-
+                
                 _processor.ProcessMessageAsync += HandleMessageAsync;
                 _processor.ProcessErrorAsync += HandleErrorAsync;
-
+                
                 await _processor.StartProcessingAsync(cancellationToken);
                 _logger.LogInformation(
-                    "OrderStockDecrementConsumer started listening on Topic '{TopicName}', Subscription '{SubscriptionName}'.",
-                    _options.TopicName,
-                    _options.SubscriptionName);
+                    "OrderStockDecrementConsumer started listening on queue '{QueueName}'.",
+                    _options.QueueName);
             }
             catch (Exception ex)
             {
@@ -68,7 +69,7 @@ public class OrderStockDecrementConsumer : BackgroundService
         return Task.CompletedTask;
     }
 
-    private async Task HandleMessageAsync(ProcessMessageEventArgs args)
+    private async Task HandleMessageAsync(ProcessSessionMessageEventArgs args)
     {
         var body = args.Message.Body.ToString();
         _logger.LogInformation("Received message with ID: {MessageId}, Subject: {Subject}", args.Message.MessageId, args.Message.Subject);

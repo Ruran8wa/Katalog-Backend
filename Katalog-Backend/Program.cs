@@ -168,16 +168,18 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-using (var scope = app.Services.CreateScope())
+var seedingEnabled = builder.Configuration.GetValue<bool?>("Seeding:Enabled") ?? true;
+
+if (seedingEnabled)
 {
-    var services = scope.ServiceProvider;
+    using var scope = app.Services.CreateScope();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     try
     {
-        await IdentitySeeder.SeedRolesAsync(services);
+        await IdentitySeeder.SeedRolesAsync(scope.ServiceProvider);
     }
     catch (Exception ex)
     {
-        var logger = services.GetRequiredService<ILogger<Program>>();
         logger.LogError(ex, "An error occurred while seeding Identity roles.");
     }
 }

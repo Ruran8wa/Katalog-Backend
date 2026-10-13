@@ -9,9 +9,9 @@
 # Test results and coverage reports
 [Tt]est[Rr]esults/
 **/[Tt]est[Rr]esults/
-*.trx
-*.coverage
-*.coveragexml
+**/*.trx
+**/*.coverage
+**/*.coveragexml
 
 # Local secrets and environment configuration
 .env
@@ -20,7 +20,7 @@
 **/appsettings.Development.json
 **/appsettings.*.Development.json
 **/appsettings.Local.json
-*.user
+**/*.user
 
 # IDE and editor settings
 .vs/
@@ -32,4 +32,4 @@
 Thumbs.db
 
 # Documentation and markdown
-*.md
+**/*.md

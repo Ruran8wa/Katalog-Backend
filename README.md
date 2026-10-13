@@ -14,7 +14,7 @@ The application is containerized and managed via Docker Compose (`compose.yaml`)
 | **`sqledge`** | `katalog-sqledge` | Azure SQL Edge container providing lightweight database backend for the Service Bus emulator. | Internal |
 | **`servicebus-emulator`**| `katalog-servicebus-emulator` | Local Azure Service Bus emulator using `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest`. Pre-configured via `emulator/Config.json`. | `5672:5672` (AMQP)<br>`5300:5300` (Management) |
 | **`api`** | `katalog-api` | ASP.NET Core Web API running as a **non-root user** (`app`, UID 1654). Handles HTTP requests and health checks. Background consumers are disabled (`Consumer__Enabled=false`). | `5297:8080` |
-| **`consumer`** | `katalog-consumer` | Dedicated background worker process consuming `order-placed-topic` events and processing transactional outbox messages. Scalable independently of the API. | Internal |
+| **`consumer`** | `katalog-consumer` | Dedicated background worker process consuming session-enabled `orders-queue` messages and processing transactional outbox messages. Scalable independently of the API. | Internal |
 
 ---
 
@@ -50,7 +50,7 @@ The API exposes ASP.NET Core health check endpoints:
   * Returns: `200 OK` (`{"status": "Healthy"}`)
 
 * **Readiness Probe**: `GET http://localhost:5297/health/ready`
-  * Verifies connectivity to the database (`ApplicationDbContext.CanConnectAsync()`) and Azure Service Bus topic.
+  * Verifies connectivity to the database (`ApplicationDbContext.CanConnectAsync()`) and Azure Service Bus queue.
   * Returns: `200 OK` when dependencies are reachable or `503 Service Unavailable` on failure.
 
 ---
@@ -65,7 +65,7 @@ The API and Consumer are decoupled into separate processes. This enables testing
    docker compose stop consumer
    ```
 2. **Publish Orders via the API**:
-   Submit orders to the API. Because the database and Service Bus emulator remain active, events are placed onto the Service Bus topic/queue without loss.
+   Submit orders to the API. Because the database and Service Bus emulator remain active, events are placed onto the Service Bus queue without loss.
 3. **Resume Consumer**:
    Start the consumer container back up:
    ```bash
@@ -95,3 +95,5 @@ When developing locally against `mcr.microsoft.com/azure-messaging/servicebus-em
    The emulator operates with `UseDevelopmentEmulator=true;SharedAccessKey=SAS_KEY_VALUE;` and does not support Azure Entra ID (Azure AD), OAuth tokens, or role-based access control (RBAC).
 6. **No Premium Tier Features**:
    Features such as geo-disaster recovery, partitioning, customer-managed keys (CMK), and message migration across namespaces are unavailable in the local emulator.
+7. **One-Hour Message TTL Limit**:
+   The emulator rejects queue configurations with a default message time-to-live longer than one hour, so the committed queue configuration uses `PT1H`.
