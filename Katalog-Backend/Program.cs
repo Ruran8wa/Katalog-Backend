@@ -1,5 +1,7 @@
 using System.Text;
 using dotenv.net;
+using Katalog_Backend.BackgroundServices;
+using Katalog_Backend.Configuration;
 using Katalog_Backend.Data;
 using Katalog_Backend.Models;
 using Katalog_Backend.Repositories;
@@ -55,6 +57,11 @@ builder.Services.AddScoped<IVariantService, VariantService>();
 builder.Services.AddScoped<IFileStorageService, CloudinaryStorageService>();
 builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<IOutboxRepository, OutboxRepository>();
+
+builder.Services.Configure<AzureServiceBusOptions>(builder.Configuration.GetSection(AzureServiceBusOptions.SectionName));
+builder.Services.AddHostedService<OutboxPublisherWorker>();
+builder.Services.AddHostedService<OrderStockDecrementConsumer>();
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));

@@ -113,9 +113,7 @@ namespace Katalog_Backend.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CategoryParentId", "CategoryName")
-                        .IsUnique()
-                        .HasFilter("[CategoryParentId] IS NOT NULL");
+                    b.HasIndex("CategoryParentId");
 
                     b.ToTable("Categories");
                 });
@@ -170,6 +168,9 @@ namespace Katalog_Backend.Migrations
                     b.Property<int>("Quantity")
                         .HasColumnType("int");
 
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
                     b.Property<string>("UserId")
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
@@ -184,6 +185,39 @@ namespace Katalog_Backend.Migrations
                     b.HasIndex("VariantId");
 
                     b.ToTable("Orders");
+                });
+
+            modelBuilder.Entity("Katalog_Backend.Models.OutboxMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ProcessedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProcessedAt");
+
+                    b.ToTable("OutboxMessages");
                 });
 
             modelBuilder.Entity("Katalog_Backend.Models.Product", b =>

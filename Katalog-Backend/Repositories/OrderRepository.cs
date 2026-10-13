@@ -46,6 +46,40 @@ public class OrderRepository(ApplicationDbContext context) : IOrderRepository
         return order;
     }
 
+    public async Task<Order> CreateWithOutboxAsync(Order order, Func<Order, OutboxMessage> outboxMessageFactory)
+    {
+        var strategy = context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            using var transaction = await context.Database.BeginTransactionAsync();
+            try
+            {
+                await context.Orders.AddAsync(order);
+                await context.SaveChangesAsync();
+
+                var outboxMessage = outboxMessageFactory(order);
+                await context.OutboxMessages.AddAsync(outboxMessage);
+                await context.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+
+                await context.Entry(order).Reference(o => o.User).LoadAsync();
+                await context.Entry(order).Reference(o => o.Variant).LoadAsync();
+                if (order.Variant != null)
+                {
+                    await context.Entry(order.Variant).Reference(v => v.Product).LoadAsync();
+                }
+
+                return order;
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        });
+    }
+
     public async Task<Order> UpdateAsync(Order order)
     {
         context.Orders.Update(order);
