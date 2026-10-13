@@ -3,6 +3,7 @@ using dotenv.net;
 using Katalog_Backend.BackgroundServices;
 using Katalog_Backend.Configuration;
 using Katalog_Backend.Data;
+using Katalog_Backend.Middleware;
 using Katalog_Backend.Models;
 using Katalog_Backend.Repositories;
 using Katalog_Backend.Repositories.Interfaces;
@@ -19,6 +20,8 @@ DotEnv.Load(options: new DotEnvOptions(probeForEnv: true, probeLevelsToSearch: 4
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -111,7 +114,7 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-app.UseExceptionHandler("/error");
+app.UseExceptionHandler();
 
 app.UseAuthentication();
 app.UseAuthorization();
