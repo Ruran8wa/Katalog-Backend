@@ -15,7 +15,7 @@ public class OrderStockDecrementConsumer : BackgroundService
     private readonly AzureServiceBusOptions _options;
     private readonly ILogger<OrderStockDecrementConsumer> _logger;
     private ServiceBusClient? _client;
-    private ServiceBusProcessor? _processor;
+    private ServiceBusSessionProcessor? _processor;
 
     public OrderStockDecrementConsumer(
         IServiceScopeFactory scopeFactory,
@@ -33,21 +33,32 @@ public class OrderStockDecrementConsumer : BackgroundService
         {
             try
             {
+                if (_options.MaxConcurrentSessions < 1 ||
+                    _options.MaxConcurrentCallsPerSession < 1 ||
+                    _options.SessionIdleTimeoutSeconds < 1)
+                {
+                    throw new InvalidOperationException(
+                        "Azure Service Bus consumer concurrency and idle timeout settings must be greater than zero.");
+                }
+
                 _client = new ServiceBusClient(_options.ConnectionString);
-                _processor = _client.CreateProcessor(_options.TopicName, _options.SubscriptionName, new ServiceBusProcessorOptions
+                _processor = _client.CreateSessionProcessor(_options.QueueName, new ServiceBusSessionProcessorOptions
                 {
                     AutoCompleteMessages = false,
-                    MaxConcurrentCalls = 1
+                    MaxConcurrentSessions = _options.MaxConcurrentSessions,
+                    MaxConcurrentCallsPerSession = _options.MaxConcurrentCallsPerSession,
+                    SessionIdleTimeout = TimeSpan.FromSeconds(_options.SessionIdleTimeoutSeconds)
                 });
-
+                
                 _processor.ProcessMessageAsync += HandleMessageAsync;
                 _processor.ProcessErrorAsync += HandleErrorAsync;
-
+                
                 await _processor.StartProcessingAsync(cancellationToken);
                 _logger.LogInformation(
-                    "OrderStockDecrementConsumer started listening on Topic '{TopicName}', Subscription '{SubscriptionName}'.",
-                    _options.TopicName,
-                    _options.SubscriptionName);
+                    "OrderStockDecrementConsumer started listening on queue '{QueueName}' with {MaxConcurrentSessions} concurrent sessions and {MaxConcurrentCallsPerSession} calls per session.",
+                    _options.QueueName,
+                    _options.MaxConcurrentSessions,
+                    _options.MaxConcurrentCallsPerSession);
             }
             catch (Exception ex)
             {
@@ -68,7 +79,7 @@ public class OrderStockDecrementConsumer : BackgroundService
         return Task.CompletedTask;
     }
 
-    private async Task HandleMessageAsync(ProcessMessageEventArgs args)
+    private async Task HandleMessageAsync(ProcessSessionMessageEventArgs args)
     {
         var body = args.Message.Body.ToString();
         _logger.LogInformation("Received message with ID: {MessageId}, Subject: {Subject}", args.Message.MessageId, args.Message.Subject);
