@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Azure.Messaging.ServiceBus;
 using Katalog_Backend.Configuration;
 using Katalog_Backend.Models;
@@ -76,7 +75,9 @@ public class OutboxPublisherWorker : BackgroundService
                             {
                                 Subject = message.EventType,
                                 MessageId = message.Id.ToString(),
-                                SessionId = GetSessionId(message),
+                                SessionId = message.SessionId ??
+                                    throw new InvalidOperationException(
+                                        $"Outbox message {message.Id} has no session ID."),
                                 ContentType = "application/json"
                             };
 
@@ -121,21 +122,5 @@ public class OutboxPublisherWorker : BackgroundService
         }
 
         await base.StopAsync(cancellationToken);
-    }
-
-    private static string GetSessionId(OutboxMessage message)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(message.Payload);
-            foreach (var name in new[] { "OrderId", "orderId" })
-            {
-                if (doc.RootElement.TryGetProperty(name, out var id))
-                    return id.ToString();
-            }
-        }
-        catch (JsonException) { }
-    
-        return message.Id.ToString();
     }
 }

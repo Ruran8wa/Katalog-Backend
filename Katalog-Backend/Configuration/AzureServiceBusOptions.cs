@@ -6,6 +6,9 @@ public class AzureServiceBusOptions
 
     public string ConnectionString { get; set; } = string.Empty;
     public string QueueName { get; set; } = "orders-queue";
+    public int MaxConcurrentSessions { get; set; } = 1;
+    public int MaxConcurrentCallsPerSession { get; set; } = 1;
+    public int SessionIdleTimeoutSeconds { get; set; } = 1;
 
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(ConnectionString) &&

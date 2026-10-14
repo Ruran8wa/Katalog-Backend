@@ -7,6 +7,9 @@ x-db-env: &db-env
 x-servicebus-env: &servicebus-env
   AzureServiceBus__ConnectionString: "${AZURE_SERVICE_BUS_CONNECTION_STRING:-Endpoint=sb://servicebus-emulator:5672/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;}"
   AzureServiceBus__QueueName: "${AZURE_SERVICE_BUS_QUEUE:-orders-queue}"
+  AzureServiceBus__MaxConcurrentSessions: "${AZURE_SERVICE_BUS_MAX_CONCURRENT_SESSIONS:-1}"
+  AzureServiceBus__MaxConcurrentCallsPerSession: "${AZURE_SERVICE_BUS_MAX_CONCURRENT_CALLS_PER_SESSION:-1}"
+  AzureServiceBus__SessionIdleTimeoutSeconds: "${AZURE_SERVICE_BUS_SESSION_IDLE_TIMEOUT_SECONDS:-1}"
 
 services:
   # ── SQL Server Database (named volume keeps data across restarts) ───────────
@@ -113,8 +116,8 @@ services:
       Cloudinary__ApiKey: "${CLOUDINARY_API_KEY:-${Cloudinary__ApiKey:-}}"
       Cloudinary__ApiSecret: "${CLOUDINARY_API_SECRET:-${Cloudinary__ApiSecret:-}}"
       # Background services run in the consumer container, not here
-      Consumer__Enabled: "false"
-      OutboxPublisher__Enabled: "false"
+      BackgroundServices__ConsumerEnabled: "false"
+      BackgroundServices__OutboxPublisherEnabled: "false"
     restart: unless-stopped
 
   # ── Order consumer + outbox publisher (same image as the API) ───────────────
@@ -123,7 +126,6 @@ services:
       context: .
       dockerfile: Dockerfile
     image: katalog-app
-    container_name: katalog-consumer
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -134,8 +136,8 @@ services:
     environment:
       <<: [*db-env, *servicebus-env]
       ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"
-      Consumer__Enabled: "true"
-      OutboxPublisher__Enabled: "true"
+      BackgroundServices__ConsumerEnabled: "true"
+      BackgroundServices__OutboxPublisherEnabled: "true"
       Seeding__Enabled: "false"
     restart: unless-stopped
 

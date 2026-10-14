@@ -92,7 +92,8 @@ public class OrderService : IOrderService
             return new OutboxMessage
             {
                 EventType = nameof(OrderPlacedEvent),
-                Payload = JsonSerializer.Serialize(@event)
+                Payload = JsonSerializer.Serialize(@event),
+                SessionId = savedOrder.Id.ToString()
             };
         });
 

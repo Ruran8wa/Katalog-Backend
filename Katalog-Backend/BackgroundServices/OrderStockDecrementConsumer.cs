@@ -33,13 +33,21 @@ public class OrderStockDecrementConsumer : BackgroundService
         {
             try
             {
+                if (_options.MaxConcurrentSessions < 1 ||
+                    _options.MaxConcurrentCallsPerSession < 1 ||
+                    _options.SessionIdleTimeoutSeconds < 1)
+                {
+                    throw new InvalidOperationException(
+                        "Azure Service Bus consumer concurrency and idle timeout settings must be greater than zero.");
+                }
+
                 _client = new ServiceBusClient(_options.ConnectionString);
                 _processor = _client.CreateSessionProcessor(_options.QueueName, new ServiceBusSessionProcessorOptions
                 {
                     AutoCompleteMessages = false,
-                    MaxConcurrentSessions = 1,
-                    MaxConcurrentCallsPerSession = 1,
-                    SessionIdleTimeout = TimeSpan.FromSeconds(1)
+                    MaxConcurrentSessions = _options.MaxConcurrentSessions,
+                    MaxConcurrentCallsPerSession = _options.MaxConcurrentCallsPerSession,
+                    SessionIdleTimeout = TimeSpan.FromSeconds(_options.SessionIdleTimeoutSeconds)
                 });
                 
                 _processor.ProcessMessageAsync += HandleMessageAsync;
@@ -47,8 +55,10 @@ public class OrderStockDecrementConsumer : BackgroundService
                 
                 await _processor.StartProcessingAsync(cancellationToken);
                 _logger.LogInformation(
-                    "OrderStockDecrementConsumer started listening on queue '{QueueName}'.",
-                    _options.QueueName);
+                    "OrderStockDecrementConsumer started listening on queue '{QueueName}' with {MaxConcurrentSessions} concurrent sessions and {MaxConcurrentCallsPerSession} calls per session.",
+                    _options.QueueName,
+                    _options.MaxConcurrentSessions,
+                    _options.MaxConcurrentCallsPerSession);
             }
             catch (Exception ex)
             {

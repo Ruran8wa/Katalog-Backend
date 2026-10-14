@@ -13,8 +13,10 @@ The application is containerized and managed via Docker Compose (`compose.yaml`)
 | **`sqlserver`** | `katalog-sqlserver` | Microsoft SQL Server 2022 database with a **named volume** (`sqlserver_data`) ensuring persistent data across restarts. | `1433:1433` |
 | **`sqledge`** | `katalog-sqledge` | Azure SQL Edge container providing lightweight database backend for the Service Bus emulator. | Internal |
 | **`servicebus-emulator`**| `katalog-servicebus-emulator` | Local Azure Service Bus emulator using `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest`. Pre-configured via `emulator/Config.json`. | `5672:5672` (AMQP)<br>`5300:5300` (Management) |
-| **`api`** | `katalog-api` | ASP.NET Core Web API running as a **non-root user** (`app`, UID 1654). Handles HTTP requests and health checks. Background consumers are disabled (`Consumer__Enabled=false`). | `5297:8080` |
-| **`consumer`** | `katalog-consumer` | Dedicated background worker process consuming session-enabled `orders-queue` messages and processing transactional outbox messages. Scalable independently of the API. | Internal |
+| **`api`** | `katalog-api` | ASP.NET Core Web API running as a **non-root user** (`app`, UID 1654). Handles HTTP requests and health checks. Background consumers are disabled (`BackgroundServices__ConsumerEnabled=false`). | `5297:8080` |
+| **`consumer`** | Compose-managed | Dedicated background worker process consuming session-enabled `orders-queue` messages and processing transactional outbox messages. Scalable independently of the API with `docker compose up --scale consumer=N`. | Internal |
+
+The consumer's `AzureServiceBus__MaxConcurrentSessions`, `AzureServiceBus__MaxConcurrentCallsPerSession`, and `AzureServiceBus__SessionIdleTimeoutSeconds` settings are configurable through environment variables. The defaults preserve strict single-session processing; increase them for higher throughput after validating database concurrency and idempotency under load.
 
 ---
 
