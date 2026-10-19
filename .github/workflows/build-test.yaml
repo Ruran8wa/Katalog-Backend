@@ -1,0 +1,151 @@
+name: katalog-backend
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  BUILD_CONFIGURATION: "Release"
+  DB_NAME: "KatalogCi"
+  COMMIT_SHA: ${{ github.sha }}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/global.json', '**/NuGet.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore Katalog-Backend.slnx
+
+      - name: Build
+        run: dotnet build Katalog-Backend.slnx --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+      - name: Check for pending EF Core model changes
+        run: |
+          dotnet tool install --global dotnet-ef --version 10.*
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+          dotnet ef migrations has-pending-model-changes \
+            --project Katalog-Backend/Katalog-Backend.csproj \
+            --configuration ${{ env.BUILD_CONFIGURATION }} \
+            --no-build
+
+      - name: Build Docker images
+        run: docker compose build --pull api consumer migrator servicebus-emulator
+
+      - name: Validate CI secrets
+        env:
+          SA_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          CI_SERVICE_BUS_CONNECTION_STRING: ${{ secrets.CI_SERVICE_BUS_CONNECTION_STRING }}
+        run: |
+          if [ -z "$SA_PASSWORD" ]; then
+            echo "::error::CI_DB_PASSWORD is not configured"
+            exit 1
+          fi
+          if [ -z "$CI_SERVICE_BUS_CONNECTION_STRING" ]; then
+            echo "::error::CI_SERVICE_BUS_CONNECTION_STRING is not configured"
+            exit 1
+          fi
+
+      - name: Start integration services
+        env:
+          SA_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+        run: docker compose up --detach --wait sqlserver sqledge servicebus-emulator
+
+      - name: Apply database migrations
+        env:
+          SA_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+        run: |
+          dotnet ef database update \
+            --project Katalog-Backend/Katalog-Backend.csproj \
+            --configuration ${{ env.BUILD_CONFIGURATION }} \
+            --connection "Server=localhost,1433;Database=$DB_NAME;User Id=sa;Pwd=$SA_PASSWORD;TrustServerCertificate=True;"
+
+      - name: Test
+        env:
+          CI_SERVICE_BUS_CONNECTION_STRING: ${{ secrets.CI_SERVICE_BUS_CONNECTION_STRING }}
+          SA_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+        run: |
+          CI_DATABASE_CONNECTION_STRING="Server=localhost,1433;Database=$DB_NAME;User Id=sa;Pwd=$SA_PASSWORD;TrustServerCertificate=True;" \
+            dotnet test Katalog-Backend.slnx \
+              --configuration ${{ env.BUILD_CONFIGURATION }} \
+              --no-build \
+              --verbosity normal \
+              --logger "trx;LogFileName=test-results.trx" \
+              --results-directory ./TestResults
+
+      - name: Upload test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults
+          if-no-files-found: warn
+
+      - name: Stop integration services
+        if: ${{ always() }}
+        run: docker compose down --volumes --remove-orphans
+
+  publish:
+    if: >-
+      ${{
+        needs.build-and-test.result == 'success' &&
+        (
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+        )
+      }}
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=${{ github.ref_name }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          build-args: |
+            COMMIT_SHA=${{ github.sha }}
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}

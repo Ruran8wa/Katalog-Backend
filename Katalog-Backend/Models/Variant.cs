@@ -14,4 +14,6 @@ public class Variant
     
     public int ProductId {get; set;}
     public required Product Product { get; set; }
+
+    public ICollection<VariantImage> Images { get; set; } = new List<VariantImage>();
 }

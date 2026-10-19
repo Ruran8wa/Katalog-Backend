@@ -14,6 +14,18 @@ public class ProductService(IProductRepository repository) : IProductService
         return products.Select(p => p.ToDto());
     }
 
+    public async Task<PagedResult<ProductResponseDto>> GetProductsAsync(ProductQueryDto query)
+    {
+        var (items, totalCount) = await repository.GetPagedAsync(query);
+        return new PagedResult<ProductResponseDto>
+        {
+            Items = items.Select(p => p.ToDto()),
+            Page = query.Page,
+            PageSize = query.PageSize,
+            TotalCount = totalCount
+        };
+    }
+
     public async Task<ProductResponseDto> GetProductByIdAsync(int id)
     {
         var product = await repository.GetByIdAsync(id);

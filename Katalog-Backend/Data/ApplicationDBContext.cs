@@ -13,11 +13,16 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<Product> Products { get; set; }
     public DbSet<Order> Orders { get; set; }
     public DbSet<Variant> Variants { get; set; }
+    public DbSet<VariantImage> VariantImages { get; set; }
+    public DbSet<OutboxMessage> OutboxMessages { get; set; }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
         
+        builder.Entity<OutboxMessage>()
+            .HasIndex(m => m.ProcessedAt);
+
         builder.Entity<CollectionProduct>().HasKey( x => new {x.CollectionId, x.ProductId});
         builder.Entity<CollectionProduct>().HasOne(x => x.Collection).WithMany(x => x.CollectionProducts).HasForeignKey(x => x.CollectionId);
         builder.Entity<CollectionProduct>().HasOne(x => x.Product).WithMany(x => x.CollectionProducts).HasForeignKey(x => x.ProductId);
@@ -35,5 +40,11 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .HasForeignKey(v => v.ProductId)
             .IsRequired()
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<VariantImage>()
+            .HasOne(vi => vi.Variant)
+            .WithMany(v => v.Images)
+            .HasForeignKey(vi => vi.VariantId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

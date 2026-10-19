@@ -1,6 +1,7 @@
 using Katalog_Backend.DTO;
 using Katalog_Backend.Exceptions;
 using Katalog_Backend.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Katalog_Backend.Controllers;
@@ -38,6 +39,7 @@ public class CollectionsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<CollectionResponseDto>> Create([FromBody] CreateCollectionDto createDto)
     {
         try
@@ -56,6 +58,7 @@ public class CollectionsController : ControllerBase
     }
 
     [HttpPut("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<CollectionResponseDto>> Update(int id, [FromBody] UpdateCollectionDto updateDto)
     {
         try
@@ -78,6 +81,7 @@ public class CollectionsController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Delete(int id)
     {
         try
@@ -92,6 +96,7 @@ public class CollectionsController : ControllerBase
     }
 
     [HttpPost("{id}/products/{productId}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> AddProduct(int id, int productId)
     {
         try
@@ -114,6 +119,7 @@ public class CollectionsController : ControllerBase
     }
 
     [HttpDelete("{id}/products/{productId}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> RemoveProduct(int id, int productId)
     {
         try
