@@ -1,0 +1,145 @@
+name: katalog
+
+# Settings shared by the api and consumer containers
+x-db-env: &db-env
+  ConnectionStrings__DefaultConnection: "Server=sqlserver,1433;Database=${DB_NAME:-KatalogDb};User Id=sa;Password=${SA_PASSWORD:-YourStrong!Passw0rd};TrustServerCertificate=True;"
+
+x-servicebus-env: &servicebus-env
+  AzureServiceBus__ConnectionString: "${AZURE_SERVICE_BUS_CONNECTION_STRING:-Endpoint=sb://servicebus-emulator:5672/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;}"
+  AzureServiceBus__QueueName: "${AZURE_SERVICE_BUS_QUEUE:-orders-queue}"
+  AzureServiceBus__MaxConcurrentSessions: "${AZURE_SERVICE_BUS_MAX_CONCURRENT_SESSIONS:-1}"
+  AzureServiceBus__MaxConcurrentCallsPerSession: "${AZURE_SERVICE_BUS_MAX_CONCURRENT_CALLS_PER_SESSION:-1}"
+  AzureServiceBus__SessionIdleTimeoutSeconds: "${AZURE_SERVICE_BUS_SESSION_IDLE_TIMEOUT_SECONDS:-1}"
+
+services:
+  # ── SQL Server Database (named volume keeps data across restarts) ───────────
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: katalog-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${SA_PASSWORD:-YourStrong!Passw0rd}"
+      MSSQL_PID: "Developer"
+    ports:
+      - "${DB_PORT:-1433}:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  # ── SQL Edge: backing store for the Service Bus emulator only ───────────────
+  sqledge:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    container_name: katalog-sqledge
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${SA_PASSWORD:-YourStrong!Passw0rd}"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  # ── Azure Service Bus Emulator (queue + sessions defined in Config.json) ────
+  # NOTE: messages are lost if THIS container restarts. Never restart it during
+  # the consumer recovery test; stop and start only the consumer.
+  servicebus-emulator:
+    build:
+      context: ./emulator
+      dockerfile: Dockerfile
+    image: katalog-servicebus-emulator
+    container_name: katalog-servicebus-emulator
+    volumes:
+      - "./emulator/Config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro"
+    ports:
+      - "5672:5672"
+      - "5300:5300"
+    environment:
+      SQL_SERVER: sqledge
+      MSSQL_SA_PASSWORD: "${SA_PASSWORD:-YourStrong!Passw0rd}"
+      ACCEPT_EULA: "Y"
+      SQL_WAIT_INTERVAL: 10
+    depends_on:
+      sqledge:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── One-off EF Core migration bundle ────────────────────────────────────────
+  migrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrator
+    image: katalog-migrator
+    container_name: katalog-migrator
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    command:
+      - "--connection"
+      - "Server=sqlserver,1433;Database=${DB_NAME:-KatalogDb};User Id=sa;Password=${SA_PASSWORD:-YourStrong!Passw0rd};TrustServerCertificate=True;"
+    restart: "no"
+
+  # ── Web API ─────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: katalog-app
+    container_name: katalog-api
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      sqlserver:
+        condition: service_healthy
+      servicebus-emulator:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-5297}:8080"
+    environment:
+      <<: [*db-env, *servicebus-env]
+      ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"
+      # JWT Authentication
+      Jwt__Key: "${JWT_KEY:-${Jwt__Key:-CHANGE_ME_use_at_least_32_chars_of_random_secret}}"
+      Jwt__Issuer: "${JWT_ISSUER:-${Jwt__Issuer:-KatalogBackend}}"
+      Jwt__Audience: "${JWT_AUDIENCE:-${Jwt__Audience:-KatalogClient}}"
+      Jwt__ExpireTime: "${JWT_EXPIRE_TIME:-${Jwt__ExpireTime:-60}}"
+      # Cloudinary
+      Cloudinary__CloudName: "${CLOUDINARY_CLOUD_NAME:-${Cloudinary__CloudName:-}}"
+      Cloudinary__ApiKey: "${CLOUDINARY_API_KEY:-${Cloudinary__ApiKey:-}}"
+      Cloudinary__ApiSecret: "${CLOUDINARY_API_SECRET:-${Cloudinary__ApiSecret:-}}"
+      # Background services run in the consumer container, not here
+      BackgroundServices__ConsumerEnabled: "false"
+      BackgroundServices__OutboxPublisherEnabled: "false"
+    restart: unless-stopped
+
+  # ── Order consumer + outbox publisher (same image as the API) ───────────────
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: katalog-app
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      sqlserver:
+        condition: service_healthy
+      servicebus-emulator:
+        condition: service_healthy
+    environment:
+      <<: [*db-env, *servicebus-env]
+      ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"
+      BackgroundServices__ConsumerEnabled: "true"
+      BackgroundServices__OutboxPublisherEnabled: "true"
+      Seeding__Enabled: "false"
+    restart: unless-stopped
+
+volumes:
+  sqlserver_data:

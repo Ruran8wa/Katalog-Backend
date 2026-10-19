@@ -1,5 +1,6 @@
 using Azure.Messaging.ServiceBus;
 using Katalog_Backend.Configuration;
+using Katalog_Backend.Models;
 using Katalog_Backend.Repositories.Interfaces;
 using Microsoft.Extensions.Options;
 
@@ -32,8 +33,8 @@ public class OutboxPublisherWorker : BackgroundService
             try
             {
                 _client = new ServiceBusClient(_options.ConnectionString);
-                _sender = _client.CreateSender(_options.TopicName);
-                _logger.LogInformation("OutboxPublisherWorker connected to Azure Service Bus topic '{TopicName}'.", _options.TopicName);
+                _sender = _client.CreateSender(_options.QueueName);
+                _logger.LogInformation("OutboxPublisherWorker connected to Azure Service Bus queue '{QueueName}'.", _options.QueueName);
             }
             catch (Exception ex)
             {
@@ -74,6 +75,9 @@ public class OutboxPublisherWorker : BackgroundService
                             {
                                 Subject = message.EventType,
                                 MessageId = message.Id.ToString(),
+                                SessionId = message.SessionId ??
+                                    throw new InvalidOperationException(
+                                        $"Outbox message {message.Id} has no session ID."),
                                 ContentType = "application/json"
                             };
 
