@@ -77,6 +77,8 @@ services:
       context: .
       dockerfile: Dockerfile
       target: migrator
+      args:
+        COMMIT_SHA: "${COMMIT_SHA:-unknown}"
     image: katalog-migrator
     container_name: katalog-migrator
     depends_on:
@@ -92,6 +94,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        COMMIT_SHA: "${COMMIT_SHA:-unknown}"
     image: katalog-app
     container_name: katalog-api
     depends_on:
@@ -125,6 +129,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        COMMIT_SHA: "${COMMIT_SHA:-unknown}"
     image: katalog-app
     depends_on:
       migrator:

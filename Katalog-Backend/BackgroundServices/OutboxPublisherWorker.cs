@@ -1,6 +1,5 @@
 using Azure.Messaging.ServiceBus;
 using Katalog_Backend.Configuration;
-using Katalog_Backend.Models;
 using Katalog_Backend.Repositories.Interfaces;
 using Microsoft.Extensions.Options;
 

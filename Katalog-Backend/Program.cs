@@ -131,6 +131,12 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
+app.MapGet("/version", (IConfiguration configuration) =>
+    Results.Ok(new
+    {
+        version = configuration["APP_VERSION"] ?? "unknown"
+    }));
+
 var appLogger = app.Services.GetRequiredService<ILogger<Program>>();
 appLogger.LogInformation(
     "Background service roles: OutboxPublisher={OutboxStatus}, Consumer={ConsumerStatus}",

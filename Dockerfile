@@ -30,6 +30,8 @@ USER $APP_UID
 ENTRYPOINT ["./efbundle"]
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+ARG COMMIT_SHA=unknown
+ENV APP_VERSION=$COMMIT_SHA
 WORKDIR /app
 
 EXPOSE 8080
