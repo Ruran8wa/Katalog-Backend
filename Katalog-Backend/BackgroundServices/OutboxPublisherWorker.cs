@@ -1,7 +1,10 @@
+using System.Diagnostics;
 using Azure.Messaging.ServiceBus;
 using Katalog_Backend.Configuration;
+using Katalog_Backend.Observability;
 using Katalog_Backend.Repositories.Interfaces;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Context.Propagation;
 
 namespace Katalog_Backend.BackgroundServices;
 
@@ -68,6 +71,20 @@ public class OutboxPublisherWorker : BackgroundService
                 {
                     foreach (var message in messages)
                     {
+                        var parentContext = ActivityContext.TryParse(
+                            message.TraceParent,
+                            null,
+                            out var parsedParent)
+                            ? parsedParent
+                            : default;
+                        using var activity = Telemetry.ActivitySource.StartActivity(
+                            "servicebus publish OrderPlaced",
+                            ActivityKind.Producer,
+                            parentContext);
+                        activity?.SetTag("messaging.system", "azure_service_bus");
+                        activity?.SetTag("messaging.destination.name", _options.QueueName);
+                        activity?.SetTag("messaging.message.id", message.Id);
+                        using var traceScope = Telemetry.BeginTraceScope(_logger);
                         try
                         {
                             var sbMessage = new ServiceBusMessage(message.Payload)
@@ -80,6 +97,12 @@ public class OutboxPublisherWorker : BackgroundService
                                 ContentType = "application/json"
                             };
 
+                            Propagators.DefaultTextMapPropagator.Inject(
+                                new PropagationContext(
+                                    activity?.Context ?? parentContext,
+                                    default),
+                                sbMessage.ApplicationProperties,
+                                static (properties, key, value) => properties[key] = value);
                             await _sender.SendMessageAsync(sbMessage, stoppingToken);
                             await outboxRepo.MarkAsProcessedAsync(message.Id, stoppingToken);
 

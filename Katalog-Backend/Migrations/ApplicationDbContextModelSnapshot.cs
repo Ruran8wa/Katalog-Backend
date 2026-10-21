@@ -210,6 +210,9 @@ namespace Katalog_Backend.Migrations
                     b.Property<string>("SessionId")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("TraceParent")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime?>("ProcessedAt")
                         .HasColumnType("datetime2");
 
