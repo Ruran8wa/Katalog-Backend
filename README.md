@@ -141,12 +141,16 @@ test, push the correction, and confirm the replacement run is green:
 
 ```bash
 gh run list --workflow build-test.yaml --limit 10
-gh run view FAILED_RUN_ID --web
-gh run view GREEN_RUN_ID --web
+gh run view 40307943777 --web
+gh run view 40308856377 --web
 ```
 
 The workflow audit page is:
 `https://github.com/Ruran8wa/Katalog-Backend/actions/workflows/build-test.yaml`.
+The deliberately failing run is
+[`40307943777`](https://github.com/Ruran8wa/Katalog-Backend/actions/runs/40307943777).
+The corrected green run, including the container smoke test, is
+[`40308856377`](https://github.com/Ruran8wa/Katalog-Backend/actions/runs/40308856377).
 Do not merge the deliberately failing commit.
 
 ### Observability NUnit tests
