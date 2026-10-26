@@ -1,4 +1,6 @@
 using System.Text;
+using System.Diagnostics;
+using System.Globalization;
 using dotenv.net;
 using Katalog_Backend.BackgroundServices;
 using Katalog_Backend.Configuration;
@@ -16,10 +18,85 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
+using OpenTelemetry.Logs;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using Katalog_Backend.Observability;
 
 DotEnv.Load(options: new DotEnvOptions(probeForEnv: true, probeLevelsToSearch: 4));
 
 var builder = WebApplication.CreateBuilder(args);
+var serviceName = builder.Configuration.GetValue<bool>("BackgroundServices:ConsumerEnabled")
+    ? "order-consumer"
+    : "inventory-api";
+var serviceVersion = builder.Configuration["APP_VERSION"] ?? "unknown";
+var deploymentEnvironment = builder.Configuration["ASPNETCORE_ENVIRONMENT"]
+    ?? Environments.Production;
+var traceSamplingRatio = ParseTraceSamplingRatio(
+    builder.Configuration["OTEL_TRACES_SAMPLER_ARG"]);
+var resourceBuilder = ResourceBuilder.CreateDefault()
+    .AddService(serviceName, serviceVersion)
+    .AddAttributes(new Dictionary<string, object>
+    {
+        ["deployment.environment"] = deploymentEnvironment
+    });
+
+builder.Logging.AddOpenTelemetry(options =>
+{
+    options.SetResourceBuilder(resourceBuilder);
+    options.IncludeFormattedMessage = true;
+    options.IncludeScopes = true;
+    options.ParseStateValues = true;
+    options.AddOtlpExporter();
+});
+
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource
+        .AddService(serviceName, serviceVersion)
+        .AddAttributes(new Dictionary<string, object>
+        {
+            ["deployment.environment"] = deploymentEnvironment
+        }))
+    .WithTracing(tracing => tracing
+        .SetSampler(new ParentBasedSampler(new TraceIdRatioBasedSampler(traceSamplingRatio)))
+        .AddSource(Telemetry.ActivitySourceName)
+        .AddAspNetCoreInstrumentation(options =>
+        {
+            options.Filter = httpContext =>
+                !httpContext.Request.Path.StartsWithSegments("/health/live") &&
+                !httpContext.Request.Path.StartsWithSegments("/health/ready");
+        })
+        .AddEntityFrameworkCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddOtlpExporter())
+    .WithMetrics(metrics => metrics
+        .AddMeter(Telemetry.MeterName)
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddRuntimeInstrumentation()
+        .AddOtlpExporter());
+
+static double ParseTraceSamplingRatio(string? configuredRatio)
+{
+    if (string.IsNullOrWhiteSpace(configuredRatio))
+    {
+        return 1.0;
+    }
+
+    if (!double.TryParse(
+            configuredRatio,
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture,
+            out var ratio) ||
+        ratio is < 0 or > 1)
+    {
+        throw new InvalidOperationException(
+            "OTEL_TRACES_SAMPLER_ARG must be a number between 0 and 1.");
+    }
+
+    return ratio;
+}
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
@@ -131,11 +208,43 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
+Telemetry.SetPendingOrdersObserver(() =>
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    return db.Orders.Count(order => order.Status == Katalog_Backend.Enums.OrderStatus.Pending);
+});
+
 app.MapGet("/version", (IConfiguration configuration) =>
     Results.Ok(new
     {
         version = configuration["APP_VERSION"] ?? "unknown"
     }));
+
+app.Use(async (context, next) =>
+{
+    var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+    using var traceScope = Telemetry.BeginTraceScope(logger);
+    var startedAt = Stopwatch.GetTimestamp();
+    try
+    {
+        await next();
+    }
+    finally
+    {
+        var endpoint = context.GetEndpoint()?.DisplayName ?? context.Request.Path.ToString();
+        var tags = new TagList { { "http.route", endpoint } };
+        Telemetry.HttpRequests.Add(1, tags);
+        if (context.Response.StatusCode >= StatusCodes.Status500InternalServerError)
+        {
+            Telemetry.HttpErrors.Add(1, tags);
+        }
+
+        Telemetry.HttpRequestDuration.Record(
+            Stopwatch.GetElapsedTime(startedAt).TotalSeconds,
+            tags);
+    }
+});
 
 var appLogger = app.Services.GetRequiredService<ILogger<Program>>();
 appLogger.LogInformation(

@@ -6,6 +6,7 @@ public class OutboxMessage
     public required string EventType { get; set; }
     public required string Payload { get; set; }
     public string? SessionId { get; set; }
+    public string? TraceParent { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ProcessedAt { get; set; }
     public string? Error { get; set; }

@@ -12,6 +12,88 @@ x-servicebus-env: &servicebus-env
   AzureServiceBus__SessionIdleTimeoutSeconds: "${AZURE_SERVICE_BUS_SESSION_IDLE_TIMEOUT_SECONDS:-1}"
 
 services:
+  # ── OpenTelemetry Collector ────────────────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: katalog-otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - "./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro"
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "9464:9464"
+    depends_on:
+      tempo:
+        condition: service_started
+      loki:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── Trace storage ──────────────────────────────────────────────────────────
+  tempo:
+    image: grafana/tempo:2.7.2
+    container_name: katalog-tempo
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - "./tempo.yaml:/etc/tempo/tempo.yaml:ro"
+      - tempo_data:/var/tempo
+    ports:
+      - "3200:3200"
+    restart: unless-stopped
+
+  # ── Log storage ────────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:latest
+    container_name: katalog-loki
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - "./loki.yaml:/etc/loki/loki.yaml:ro"
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+
+  # ── Metrics storage ────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: katalog-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    volumes:
+      - "./prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      otel-collector:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── Visualization ──────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: katalog-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-change-me}"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - "./grafana/provisioning:/etc/grafana/provisioning:ro"
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      tempo:
+        condition: service_started
+      loki:
+        condition: service_started
+      prometheus:
+        condition: service_started
+    restart: unless-stopped
+
   # ── SQL Server Database (named volume keeps data across restarts) ───────────
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -105,11 +187,15 @@ services:
         condition: service_healthy
       servicebus-emulator:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     ports:
       - "${APP_PORT:-5297}:8080"
     environment:
       <<: [*db-env, *servicebus-env]
       ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"
+      OTEL_TRACES_SAMPLER_ARG: "${OTEL_TRACES_SAMPLER_ARG:-1.0}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}"
       # JWT Authentication
       Jwt__Key: "${JWT_KEY:-${Jwt__Key:-CHANGE_ME_use_at_least_32_chars_of_random_secret}}"
       Jwt__Issuer: "${JWT_ISSUER:-${Jwt__Issuer:-KatalogBackend}}"
@@ -139,9 +225,13 @@ services:
         condition: service_healthy
       servicebus-emulator:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     environment:
       <<: [*db-env, *servicebus-env]
       ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"
+      OTEL_TRACES_SAMPLER_ARG: "${OTEL_TRACES_SAMPLER_ARG:-1.0}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}"
       BackgroundServices__ConsumerEnabled: "true"
       BackgroundServices__OutboxPublisherEnabled: "true"
       Seeding__Enabled: "false"
@@ -149,3 +239,7 @@ services:
 
 volumes:
   sqlserver_data:
+  tempo_data:
+  loki_data:
+  prometheus_data:
+  grafana_data:

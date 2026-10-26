@@ -1,10 +1,12 @@
 using System.Text.Json;
+using System.Diagnostics;
 using Katalog_Backend.DTO;
 using Katalog_Backend.Enums;
 using Katalog_Backend.Events;
 using Katalog_Backend.Exceptions;
 using Katalog_Backend.Mappers;
 using Katalog_Backend.Models;
+using Katalog_Backend.Observability;
 using Katalog_Backend.Repositories.Interfaces;
 using Katalog_Backend.Services.Interfaces;
 using Microsoft.AspNetCore.Identity;
@@ -93,10 +95,12 @@ public class OrderService : IOrderService
             {
                 EventType = nameof(OrderPlacedEvent),
                 Payload = JsonSerializer.Serialize(@event),
-                SessionId = savedOrder.Id.ToString()
+                SessionId = savedOrder.Id.ToString(),
+                TraceParent = Activity.Current?.Id
             };
         });
 
+        Telemetry.OrdersPlaced.Add(1);
         return created.ToDto();
     }
 
