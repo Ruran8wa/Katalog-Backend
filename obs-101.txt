@@ -1,0 +1,409 @@
+OBS-101: Skills and Knowledge Required to Implement the Observability Work
+==========================================================================
+
+Purpose
+-------
+
+This guide explains what a developer needs to know to implement the observability
+work in this branch from scratch. It also explains what was implemented in this
+project and why each part exists.
+
+The target is a .NET backend with an API, an outbox publisher, an Azure Service
+Bus consumer, and a SQL Server database. The implementation exports traces,
+metrics, and logs through an OpenTelemetry Collector. The Collector forwards
+each signal to a local storage backend and does not send telemetry to a hosted
+service.
+
+
+1. Skills required
+------------------
+
+The developer should be comfortable with the following areas:
+
+1. C# and .NET application development
+   - .NET dependency injection and service registration.
+   - ASP.NET Core middleware, controllers, hosted services, and configuration.
+   - async/await, cancellation tokens, exception handling, and resource disposal.
+   - Generic host startup and application lifetime.
+   - NuGet package management and version compatibility.
+
+2. ASP.NET Core observability
+   - The difference between application logs, traces, and metrics.
+   - Middleware execution order and how Activity.Current is created.
+   - ASP.NET Core request instrumentation.
+   - HTTP route names and low-cardinality metric dimensions.
+   - Health checks and why noisy health endpoints should be excluded from traces.
+
+3. OpenTelemetry concepts
+   - Resources identify a service and its deployment.
+   - Traces contain a trace ID and a tree of spans.
+   - Metrics contain instruments, measurements, units, and attributes.
+   - Logs are structured records that can be correlated with traces.
+   - Instrumentation packages provide automatic telemetry; ActivitySource and
+     Meter provide application-specific telemetry.
+   - Exporters send telemetry to a destination. The application sends OTLP data
+     only to the Collector; storage backends are configured behind the
+     Collector, not in the application.
+
+4. System.Diagnostics APIs
+   - System.Diagnostics.Activity and ActivitySource for spans.
+   - ActivityContext and W3C trace context.
+   - System.Diagnostics.Metrics Counter, Histogram, and ObservableGauge.
+   - Activity.Current and how it flows through asynchronous work.
+
+5. Structured logging with ILogger
+   - Message templates such as "Order {OrderId} failed".
+   - The difference between message-template placeholders and string
+     interpolation.
+   - Logging scopes and structured scope properties.
+   - Exception overloads, for example LogError(exception, template, values).
+   - Avoiding personal data, secrets, tokens, and high-cardinality identifiers
+     in logs and metric attributes.
+
+6. Entity Framework Core
+   - DbContext lifetime and dependency injection scopes.
+   - EF Core query and SaveChanges instrumentation.
+   - Transactions, execution strategies, and order state transitions.
+   - Database migrations and keeping the model snapshot synchronized.
+
+7. Azure Service Bus and messaging
+   - Producers, consumers, sessions, message completion, abandonment, and
+     dead-lettering.
+   - BackgroundService and ServiceBusSessionProcessor lifetimes.
+   - Message application properties.
+   - W3C trace context propagation across process boundaries.
+   - Idempotency and why retries affect span and metric design.
+
+8. Distributed systems and domain modeling
+   - The API request and asynchronous consumer operation are separate pieces of
+     work that must be correlated.
+   - The outbox pattern prevents losing a message after an order is committed.
+   - Pending, Confirmed, and Failed are business states, not merely log text.
+   - A processing metric must measure the business transition from Pending to a
+     final state rather than only message-handler runtime.
+
+9. CI/CD and container validation
+   - Docker multi-stage builds and Release publishing.
+   - GitHub Actions workflow execution and artifacts.
+   - Passing the commit SHA into an image as APP_VERSION.
+   - Reading container logs to verify console-exported telemetry.
+   - Running targeted builds before pushing changes.
+
+
+2. OpenTelemetry design knowledge needed
+----------------------------------------
+
+Start by defining the telemetry contract before writing code:
+
+- Service names:
+  - inventory-api for the API process.
+  - order-consumer for the consumer process.
+- Service version:
+  - APP_VERSION, populated by the CI/CD commit SHA.
+- Deployment environment:
+  - ASPNETCORE_ENVIRONMENT, defaulting to Production.
+- Activity source:
+  - Katalog-Backend.
+- Meter:
+  - Katalog-Backend.
+
+The same resource attributes must be applied to logs, traces, and metrics.
+Otherwise, a backend cannot reliably group all signals belonging to one
+service and deployment.
+
+The project registers:
+
+- OpenTelemetry logging with IncludeFormattedMessage, IncludeScopes,
+  ParseStateValues, and the OTLP exporter.
+- ASP.NET Core tracing instrumentation.
+- EF Core tracing instrumentation.
+- HttpClient tracing and metrics instrumentation.
+- .NET runtime metrics instrumentation.
+- The application ActivitySource and Meter.
+- OTLP exporters for logs, traces, and metrics.
+
+Automatic instrumentation is appropriate for framework work that should be
+observed consistently. Custom ActivitySource spans are appropriate for business
+operations such as publishing and processing OrderPlaced.
+
+
+3. Trace implementation
+-----------------------
+
+The developer needs to understand the complete order trace:
+
+1. An HTTP request enters the API.
+2. ASP.NET Core instrumentation creates the request span.
+3. EF Core instrumentation records database queries.
+4. The API creates a Pending order and an outbox record.
+5. The outbox record stores the request trace parent.
+6. The publisher restores that context and creates a Service Bus producer span.
+7. The publisher injects W3C traceparent into Service Bus application properties.
+8. The consumer extracts the trace context.
+9. The consumer creates a Service Bus consumer span.
+10. A nested custom span covers stock lookup, decrement, and SaveChanges.
+11. EF Core instrumentation records the consumer database operations.
+
+The outbox TraceParent field is necessary because the publisher runs later,
+outside the original HTTP request. Store only trace context needed for
+propagation; do not store request bodies, access tokens, or personal data.
+
+The producer uses ActivityContext.TryParse to restore the saved parent. The
+consumer uses Propagators.DefaultTextMapPropagator.Extract to read the W3C
+context from message application properties. This creates a single trace
+across the API and consumer when the context is valid.
+
+Health checks are excluded from ASP.NET Core request tracing using a filter for
+/health/live and /health/ready. Health metrics remain available. This prevents
+readiness and liveness polling from hiding useful business traffic.
+
+The custom stock span contains:
+
+- order.id
+- variant.sku when the variant is loaded
+- order.outcome
+
+These attributes are allowed by the requirement, but email addresses, names,
+tokens, and other personal data must never be put in spans or logs.
+
+
+4. Metrics implementation
+-------------------------
+
+Use System.Diagnostics.Metrics and create instruments once in a shared telemetry
+class. The implementation contains:
+
+- katalog.orders.placed
+  A counter incremented when the API successfully creates a Pending order.
+
+- katalog.orders.processed
+  A counter incremented when the consumer moves an order to a final result.
+  It carries low-cardinality tags:
+    outcome=confirmed or rejected
+    rejection.reason=none, insufficient_stock, variant_not_found, and similar
+    controlled values.
+
+- katalog.orders.processing.duration
+  A histogram in milliseconds. It measures the time from the order CreatedAt
+  while Pending until the consumer records a final status.
+
+- katalog.orders.pending
+  An observable gauge that queries the database for the number of orders whose
+  status is Pending.
+
+- HTTP request counters and duration histogram.
+- .NET runtime metrics from automatic instrumentation.
+
+Metric tags must remain low-cardinality. Never use order IDs, user IDs, message
+IDs, or SKUs as metric attributes. Those values create an unbounded number of
+time series and can make a metrics backend expensive or unusable. IDs may be
+appropriate in a trace or a carefully reviewed structured log, but they do not
+belong in these metrics.
+
+The pending gauge is different from a counter: it reports the current state,
+not the number of transitions. An observable callback is registered after the
+application is built and creates a short database scope to count Pending rows.
+
+
+5. Structured logging and correlation
+-------------------------------------
+
+All application logs should use ILogger message templates:
+
+  logger.LogWarning(
+      "Insufficient stock for Variant {VariantId}. Requested: {Requested}.",
+      variantId,
+      requested);
+
+Do not write:
+
+  logger.LogWarning($"Insufficient stock for Variant {variantId}.");
+
+Templates preserve named properties for OpenTelemetry and other structured
+logging providers. They also avoid formatting work when the log level is
+disabled.
+
+OpenTelemetry logging is configured to include:
+
+- The formatted message.
+- Logging scopes.
+- Parsed template state values.
+- The OTLP exporter.
+
+Every log emitted during a request or message is placed inside a scope
+containing:
+
+- trace_id
+- span_id
+
+The shared BeginTraceScope helper reads Activity.Current and calls ILogger
+BeginScope with a dictionary of structured fields. The HTTP middleware opens
+the scope around the complete request pipeline. The Service Bus consumer opens
+it around the complete handler try/catch. The outbox publisher opens it around
+each producer operation, including its failure catch block.
+
+This scope placement matters: if the scope exists only inside try, an exception
+log in catch can lose the correlation fields.
+
+Logs created at process startup, before a request, or during an idle background
+loop may not have a meaningful trace. Those logs should not invent a fake
+trace. Request and message logs must be correlated; standalone lifecycle logs
+can legitimately use unknown or absent correlation values.
+
+Do not log:
+
+- Passwords, JWTs, Service Bus connection strings, or secrets.
+- Email addresses or names.
+- Complete message bodies.
+- Database connection strings.
+- Personal data copied into exception messages.
+
+
+6. Package and registration work
+--------------------------------
+
+Add compatible versions of these packages to the application project:
+
+- OpenTelemetry
+- OpenTelemetry.Exporter.OpenTelemetryProtocol
+- OpenTelemetry.Extensions.Hosting
+- OpenTelemetry.Instrumentation.AspNetCore
+- OpenTelemetry.Instrumentation.EntityFrameworkCore
+- OpenTelemetry.Instrumentation.Http
+- OpenTelemetry.Instrumentation.Runtime
+
+After package installation:
+
+1. Create a shared Observability/Telemetry.cs class.
+2. Register resource attributes and logging in Program.cs.
+3. Register tracing and metrics providers in Program.cs.
+4. Register only the application ActivitySource and Meter used by custom
+   telemetry.
+5. Add automatic instrumentation.
+6. Add custom spans at business and messaging boundaries.
+7. Add custom instruments and record them at business state transitions.
+8. Add trace propagation to the outbox model and database migration.
+9. Add logging scopes at request and message boundaries.
+10. Add an OpenTelemetry Collector service with an OTLP receiver and one
+    pipeline for each signal.
+
+Keep package versions aligned. Instrumentation package compatibility matters
+because APIs and dependency versions can differ between OpenTelemetry releases.
+
+
+7. Database and messaging changes
+----------------------------------
+
+The outbox model gains a nullable TraceParent column. Create an EF Core
+migration and update the model snapshot. The API writes Activity.Current.Id
+when it creates the outbox message.
+
+The publisher:
+
+- Reads unprocessed records.
+- Restores the saved parent context.
+- Starts a producer Activity.
+- Injects propagation values into Service Bus application properties.
+- Sends the message.
+- Marks the outbox record as processed.
+- Logs success or failure using templates.
+
+The consumer:
+
+- Extracts propagation values.
+- Starts a consumer Activity.
+- Deserializes the message.
+- Starts the custom stock span after a valid order event exists.
+- Checks order state and variant stock.
+- Saves the final state transactionally.
+- Records processing metrics only when a final status is reached.
+- Completes, abandons, or dead-letters the message as appropriate.
+
+Use controlled outcome and rejection-reason values. Do not use arbitrary
+exception text as a metric tag.
+
+
+8. Validation skills and checks
+-------------------------------
+
+A developer should validate both compilation and observable behavior:
+
+1. Formatting and static checks
+   - Run git diff --check.
+   - Review all changed logging calls for message templates.
+   - Search for interpolated ILogger messages.
+   - Review metric tags for IDs, users, SKUs, or unbounded values.
+
+2. Build
+   - Run a Release build or Docker Release publish.
+   - Confirm OpenTelemetry namespaces and extension methods compile.
+   - Treat compiler errors as failures; warnings should be reviewed.
+
+3. Trace verification
+   - Make an order request.
+   - Confirm API HTTP and EF spans appear.
+   - Confirm producer and consumer spans share the trace ID.
+   - Confirm the stock span contains only approved attributes.
+   - Confirm health checks do not create request traces.
+
+4. Metrics verification
+   - Place an order and confirm the placed counter increments.
+   - Process confirmed and rejected orders and inspect outcome tags.
+   - Confirm processing duration is reported in milliseconds.
+   - Confirm the pending gauge reflects database state.
+   - Confirm runtime, HTTP, and EF-related metrics are exported.
+
+5. Log verification
+   - Inspect API and consumer container logs.
+   - Confirm OpenTelemetry log records are present.
+   - Confirm request/message records contain trace_id and span_id.
+   - Confirm exception records retain the correlation scope.
+   - Confirm no secret or personal data is emitted.
+
+6. Integration validation
+   - Run SQL Server and the Service Bus emulator or Testcontainers locally.
+   - Apply migrations.
+   - Run the full test suite, not only unit tests.
+   - Validate outbox retry, duplicate message handling, dead-lettering, and
+     insufficient-stock paths.
+
+
+9. Expected outcome
+-------------------
+
+After implementation, a developer should be able to follow one purchase from
+the HTTP request through database writes, outbox publication, Service Bus
+delivery, consumer processing, stock mutation, and final order status.
+
+The trace explains the individual operations. Metrics show rates, outcomes,
+latency, runtime health, and Pending backlog. Structured logs explain events
+and errors while carrying the same trace and span identifiers. Resource
+attributes identify which service and deployment produced every signal.
+
+The Collector is the only application telemetry destination. Start the stack
+with `docker compose up -d`; traces are stored in Tempo, metrics are scraped
+from the Collector by Prometheus, and logs are stored in Loki. Grafana is
+available at `http://localhost:3000` with all three data sources provisioned.
+The Collector can also be inspected with `docker compose logs -f
+otel-collector` while troubleshooting delivery.
+
+
+10. Configurable trace sampling
+-------------------------------
+
+Trace sampling is configured through the standard OTEL_TRACES_SAMPLER_ARG
+environment variable. It is a ratio from 0 to 1:
+
+- 1.0 records 100% of traces.
+- 0.1 records approximately 10% of traces.
+- 0.0 records no new traces.
+
+The application defaults to 1.0 when the variable is absent, which keeps local
+development fully observable. ParentBasedSampler preserves an already-sampled
+parent decision across the distributed API, outbox publisher, and consumer
+trace. In a deployed environment, set the value explicitly, for example:
+
+  OTEL_TRACES_SAMPLER_ARG=0.1
+
+Invalid values, values outside 0 through 1, and non-numeric text fail
+application startup instead of silently changing sampling behavior.

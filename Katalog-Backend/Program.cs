@@ -1,5 +1,6 @@
 using System.Text;
 using System.Diagnostics;
+using System.Globalization;
 using dotenv.net;
 using Katalog_Backend.BackgroundServices;
 using Katalog_Backend.Configuration;
@@ -32,6 +33,8 @@ var serviceName = builder.Configuration.GetValue<bool>("BackgroundServices:Consu
 var serviceVersion = builder.Configuration["APP_VERSION"] ?? "unknown";
 var deploymentEnvironment = builder.Configuration["ASPNETCORE_ENVIRONMENT"]
     ?? Environments.Production;
+var traceSamplingRatio = ParseTraceSamplingRatio(
+    builder.Configuration["OTEL_TRACES_SAMPLER_ARG"]);
 var resourceBuilder = ResourceBuilder.CreateDefault()
     .AddService(serviceName, serviceVersion)
     .AddAttributes(new Dictionary<string, object>
@@ -45,7 +48,7 @@ builder.Logging.AddOpenTelemetry(options =>
     options.IncludeFormattedMessage = true;
     options.IncludeScopes = true;
     options.ParseStateValues = true;
-    options.AddConsoleExporter();
+    options.AddOtlpExporter();
 });
 
 builder.Services.AddOpenTelemetry()
@@ -56,6 +59,7 @@ builder.Services.AddOpenTelemetry()
             ["deployment.environment"] = deploymentEnvironment
         }))
     .WithTracing(tracing => tracing
+        .SetSampler(new ParentBasedSampler(new TraceIdRatioBasedSampler(traceSamplingRatio)))
         .AddSource(Telemetry.ActivitySourceName)
         .AddAspNetCoreInstrumentation(options =>
         {
@@ -65,13 +69,34 @@ builder.Services.AddOpenTelemetry()
         })
         .AddEntityFrameworkCoreInstrumentation()
         .AddHttpClientInstrumentation()
-        .AddConsoleExporter())
+        .AddOtlpExporter())
     .WithMetrics(metrics => metrics
         .AddMeter(Telemetry.MeterName)
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
         .AddRuntimeInstrumentation()
-        .AddConsoleExporter());
+        .AddOtlpExporter());
+
+static double ParseTraceSamplingRatio(string? configuredRatio)
+{
+    if (string.IsNullOrWhiteSpace(configuredRatio))
+    {
+        return 1.0;
+    }
+
+    if (!double.TryParse(
+            configuredRatio,
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture,
+            out var ratio) ||
+        ratio is < 0 or > 1)
+    {
+        throw new InvalidOperationException(
+            "OTEL_TRACES_SAMPLER_ARG must be a number between 0 and 1.");
+    }
+
+    return ratio;
+}
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
@@ -210,7 +235,7 @@ app.Use(async (context, next) =>
         var endpoint = context.GetEndpoint()?.DisplayName ?? context.Request.Path.ToString();
         var tags = new TagList { { "http.route", endpoint } };
         Telemetry.HttpRequests.Add(1, tags);
-        if (context.Response.StatusCode >= StatusCodes.Status400BadRequest)
+        if (context.Response.StatusCode >= StatusCodes.Status500InternalServerError)
         {
             Telemetry.HttpErrors.Add(1, tags);
         }

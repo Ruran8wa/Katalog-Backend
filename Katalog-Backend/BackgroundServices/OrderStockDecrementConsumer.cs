@@ -231,6 +231,10 @@ public class OrderStockDecrementConsumer : BackgroundService
 
     private Task HandleErrorAsync(ProcessErrorEventArgs args)
     {
+        using var activity = Telemetry.ActivitySource.StartActivity(
+            "servicebus process error",
+            ActivityKind.Consumer);
+        using var traceScope = Telemetry.BeginTraceScope(_logger);
         _logger.LogError(args.Exception, "Azure Service Bus processor encountered an error. Source: {ErrorSource}, Entity: {EntityPath}",
             args.ErrorSource,
             args.EntityPath);

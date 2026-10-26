@@ -41,6 +41,23 @@ docker compose logs -f api
 docker compose logs -f consumer
 ```
 
+Grafana is available at `http://localhost:${GRAFANA_PORT:-3000}` using the
+`GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` values from `.env`. The local
+Grafana instance is provisioned with Prometheus, Tempo, and Loki data sources.
+Trace-to-log and log-to-trace links are configured from the repository files;
+no Grafana UI setup is required. The provisioned `Katalog Backend Overview`
+dashboard includes endpoint request rate, 5xx error rate, p95 request latency,
+order outcomes, p95 order processing time, and current Pending orders. The
+application sends all telemetry to the local OpenTelemetry Collector and does
+not connect directly to a hosted or storage backend. A provisioned Grafana
+alert named `Orders have stayed Pending` fires when the Pending-order gauge
+remains above zero for two minutes. Two minutes is long enough to ignore
+normal short-lived asynchronous processing and transient queue delay, while
+still detecting a stalled consumer or unavailable messaging/database path
+quickly. The alert is a warning because a small backlog can be expected during
+brief load spikes; operators should investigate the consumer and dependencies
+before treating it as an outage.
+
 ---
 
 ## Health Check Endpoints

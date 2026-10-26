@@ -63,7 +63,7 @@ public static class Telemetry
         Meter.CreateCounter<long>(
             "katalog.http.errors",
             unit: "{error}",
-            description: "HTTP requests that completed with an error status.");
+            description: "HTTP requests that completed with a 5xx status.");
 
     public static readonly Histogram<double> HttpRequestDuration =
         Meter.CreateHistogram<double>(
