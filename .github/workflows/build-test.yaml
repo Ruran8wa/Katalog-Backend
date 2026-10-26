@@ -149,3 +149,14 @@ jobs:
             COMMIT_SHA=${{ github.sha }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+
+  container-smoke:
+    if: ${{ github.event_name == 'pull_request' }}
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Docker Compose container smoke test
+        run: ./scripts/container-smoke-test.sh
