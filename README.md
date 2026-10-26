@@ -116,3 +116,95 @@ When developing locally against `mcr.microsoft.com/azure-messaging/servicebus-em
    Features such as geo-disaster recovery, partitioning, customer-managed keys (CMK), and message migration across namespaces are unavailable in the local emulator.
 7. **One-Hour Message TTL Limit**:
    The emulator rejects queue configurations with a default message time-to-live longer than one hour, so the committed queue configuration uses `PT1H`.
+
+## Testing Requirements
+
+The complete NUnit suite remains the CI gate. It runs on every push and pull
+request, and the `container-smoke` job runs the Docker smoke test on every pull
+request:
+
+```bash
+dotnet test Katalog-Backend.slnx --configuration Release
+./scripts/container-smoke-test.sh
+```
+
+The container smoke test starts the Compose stack, waits for `/health/ready`,
+seeds product `1`, verifies `GET /api/products/1` returns `200 OK`, stops SQL
+Server and verifies that `/health/ready` returns `503` while `/health/live`
+continues to return `200`, then removes the stack and its volumes. A failed
+NUnit test or smoke assertion exits non-zero and blocks the pull request check.
+
+To demonstrate the pipeline gate without changing production code, create a
+temporary failing NUnit test on a throwaway branch, push it, and open a pull
+request. The required `build-and-test` check must fail before merge. Remove the
+test, push the correction, and confirm the replacement run is green:
+
+```bash
+gh run list --workflow build-test.yaml --limit 10
+gh run view 40307943777 --web
+gh run view 40308856377 --web
+```
+
+The workflow audit page is:
+`https://github.com/Ruran8wa/Katalog-Backend/actions/workflows/build-test.yaml`.
+The deliberately failing run is
+[`40307943777`](https://github.com/Ruran8wa/Katalog-Backend/actions/runs/40307943777).
+The corrected green run, including the container smoke test, is
+[`40308856377`](https://github.com/Ruran8wa/Katalog-Backend/actions/runs/40308856377).
+Do not merge the deliberately failing commit.
+
+### Observability NUnit tests
+
+`Katalog-Backend.Tests/Observability/TelemetryTests.cs` uses the OpenTelemetry
+in-memory exporter to verify that producer and consumer spans retain one trace
+ID. It also listens to the orders-processed counter and verifies the confirmed
+and insufficient-stock rejection measurements:
+
+```bash
+dotnet test Katalog-Backend.Tests/Katalog-Backend.Tests.csproj \
+  --configuration Release --filter FullyQualifiedName~TelemetryTests
+```
+
+### Local end-to-end observability check
+
+From a clean clone, copy `.env.example` to `.env` and start the stack:
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+Register or log in through `/api/auth`, place an order with
+`POST /api/orders` using `{"variantId":1,"quantity":1}`, and open
+`http://localhost:3000`. In the `Katalog Backend Overview` dashboard, confirm
+the order counters and Pending gauge. Open the matching trace in Tempo and
+confirm the API request, Service Bus publish, consumer processing, and database
+update spans. Open the consumer log in Loki and use its `trace_id` link to jump
+to the same Tempo trace.
+
+To verify telemetry is non-blocking, stop only the Collector, place another
+order, and confirm the API still returns `202 Accepted` and the consumer still
+confirms or rejects the order:
+
+```bash
+docker compose stop otel-collector
+./scripts/collector-outage-test.sh
+docker compose start otel-collector
+```
+
+### Observed load test
+
+Run the Stage 3 buffering scenario against the local Compose stack:
+
+```bash
+./scripts/observability-load-test.sh
+```
+
+The script resets variant `1` to six units and submits twenty purchases. After
+the consumer drains the queue, Grafana must show six `confirmed` and fourteen
+`rejected` orders, with `insufficient_stock` as the rejection reason. Capture
+the dashboard and one API-to-consumer trace from Grafana for the review record:
+
+![Observed load dashboard](docs/screenshots/observed-load-dashboard.png)
+
+![Observed API-to-consumer trace](docs/screenshots/observed-load-trace.png)
