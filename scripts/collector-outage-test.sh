@@ -2,7 +2,10 @@
 set -euo pipefail
 
 app_url="${APP_URL:-http://localhost:${APP_PORT:-5297}}"
-db_password="${SA_PASSWORD:-$(sed -n 's/^SA_PASSWORD=//p' .env 2>/dev/null | head -n 1)}"
+db_password="${SA_PASSWORD:-}"
+if [[ -z "$db_password" && -f .env ]]; then
+  db_password="$(sed -n 's/^SA_PASSWORD=//p' .env | head -n 1)"
+fi
 db_password="${db_password:-YourStrong!Passw0rd}"
 compose=(docker compose)
 email="collector-outage.$(date +%s)@example.com"
