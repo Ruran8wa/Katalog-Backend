@@ -13,7 +13,7 @@ cp .env.example .env && docker compose up -d                          # full sta
 dotnet ef migrations add <Name> --project Katalog-Backend/Katalog-Backend.csproj
 ```
 
-`Tests/Integration/*` need SQL Server and the emulator running (`docker compose up -d sqlserver sqledge servicebus-emulator`).
+`Tests/Integration/*` need SQL Server and the emulator running (`docker compose up -d sqlserver sqledge servicebus-emulator`) and use their own `KatalogTests` database. Never run `container-smoke-test.sh` casually: it ends with `docker compose down --volumes`.
 
 ## Structure
 
@@ -25,7 +25,8 @@ dotnet ef migrations add <Name> --project Katalog-Backend/Katalog-Backend.csproj
 
 1. `POST /api/orders` → `OrderService.CreateOrderAsync` validates stock. In a single transaction it saves a `Pending` order and an `OutboxMessage` (`OrderPlacedEvent`, SessionId = order id, `TraceParent`), then returns `202`.
 2. `OutboxPublisherWorker` (consumer process) publishes outbox rows to the session-enabled `orders-queue` and propagates the trace context.
-3. `OrderStockDecrementConsumer` decrements stock in a transaction and sets the order to `Confirmed`, or sets it to `Failed` (insufficient stock / variant missing). It skips orders that are no longer `Pending`, which makes redelivery idempotent.
+3. `OrderStockDecrementConsumer` hands the event to `OrderPlacedHandler`. The handler takes the order row's current quantity, decrements stock and sets the order to `Confirmed`, or sets it to `Failed` (insufficient stock / variant missing). It skips orders that are no longer `Pending`, which makes redelivery idempotent.
+4. `POST /api/orders/{id}/cancel` cancels a `Pending` or `Confirmed` order for its owner or an admin. Cancelling a `Confirmed` order releases its stock.
 
 Domain terms (Refused, Rejected, Cancelled…) are defined in `GLOSSARY.md`. Rejected maps to `OrderStatus.Failed` in code.
 
@@ -40,6 +41,7 @@ Trace context must survive API → outbox → Service Bus → consumer (`Telemet
 - Write logs as `ILogger` message templates (`LogWarning("Order {OrderId} rejected", id)`), never string interpolation.
 - Keep personal data (emails, names, user IDs, tokens) out of logs and span attributes. Order, variant and message IDs are fine.
 - Metric tags must be low-cardinality (outcome, reason, route). Never use IDs, users or free text.
+- Change stock only through `Data/StockUpdates` (atomic, guarded updates), never read-modify-write. API-side order changes go through `IOrderRepository.SaveWithStockChangeAsync`. `OrderPlacedHandler` saves on the context directly, because a shortfall there rejects the order instead of throwing. `Order.RowVersion` turns a stale save into a 409 on the API and a retry in the consumer.
 - Never edit a migration that has already been applied. Add a new one. CI fails on pending model changes.
 - PRs target `dev`.
 - Restarting the `servicebus-emulator` container drops every queued message. For recovery tests, restart only `consumer`.
