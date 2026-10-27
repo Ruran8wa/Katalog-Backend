@@ -68,4 +68,31 @@ public sealed class OrderConcurrencyTests
 
         Assert.That(await TestDatabase.GetStockAsync(variant.Id), Is.EqualTo(10));
     }
+
+    [Test]
+    public async Task QuantityChangeReadAsPending_AfterTheConsumerConfirmedIt_ConflictsAndChangesNothing()
+    {
+        var variant = await TestDatabase.SeedVariantAsync(quantity: 10);
+        var seeded = await TestDatabase.SeedOrderAsync(_userId, variant.Id, quantity: 3);
+
+        await using var apiContext = TestDatabase.CreateContext();
+        var repository = new OrderRepository(apiContext);
+        var staleOrder = (await repository.GetByIdAsync(seeded.Id))!;
+
+        await using (var consumerContext = TestDatabase.CreateContext())
+        {
+            await new OrderPlacedHandler(consumerContext, NullLogger<OrderPlacedHandler>.Instance).HandleAsync(
+                new OrderPlacedEvent(seeded.Id, seeded.UserId, seeded.VariantId, seeded.Quantity, seeded.CreatedAt));
+        }
+
+        // Read as Pending, so the service would change no stock.
+        staleOrder.Quantity = 5;
+        Assert.ThrowsAsync<OrderConcurrencyConflictException>(
+            () => repository.SaveWithStockChangeAsync(staleOrder, stockDelta: 0));
+
+        var stored = await TestDatabase.GetOrderAsync(seeded.Id);
+        Assert.That(stored.Quantity, Is.EqualTo(3));
+        Assert.That(stored.Status, Is.EqualTo(OrderStatus.Confirmed));
+        Assert.That(await TestDatabase.GetStockAsync(variant.Id), Is.EqualTo(7));
+    }
 }

@@ -81,13 +81,6 @@ public class OrderRepository(ApplicationDbContext context) : IOrderRepository
         });
     }
 
-    public async Task<Order> UpdateAsync(Order order)
-    {
-        context.Orders.Update(order);
-        await context.SaveChangesAsync();
-        return order;
-    }
-
     public async Task<Order> SaveWithStockChangeAsync(Order order, int stockDelta)
     {
         var strategy = context.Database.CreateExecutionStrategy();

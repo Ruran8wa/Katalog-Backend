@@ -180,4 +180,106 @@ public sealed class OrdersApiTests
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
     }
+
+    [Test]
+    public async Task Delete_ByACustomer_IsForbiddenEvenForTheirOwnOrder()
+    {
+        var (orderId, _) = await SeedOrderWithVariantAsync(_owner.UserId, OrderStatus.Cancelled, quantity: 2, stock: 10);
+
+        using var response = await _owner.Client.DeleteAsync($"/api/orders/{orderId}");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+    }
+
+    [TestCase(OrderStatus.Pending)]
+    [TestCase(OrderStatus.Confirmed)]
+    public async Task Delete_PendingOrConfirmedOrder_Returns409AndKeepsIt(OrderStatus status)
+    {
+        var (orderId, variantId) = await SeedOrderWithVariantAsync(_owner.UserId, status, quantity: 2, stock: 10);
+
+        using var response = await _admin.Client.DeleteAsync($"/api/orders/{orderId}");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+        Assert.That((await TestDatabase.GetOrderAsync(orderId)).Status, Is.EqualTo(status));
+        Assert.That(await TestDatabase.GetStockAsync(variantId), Is.EqualTo(10));
+    }
+
+    [TestCase(OrderStatus.Failed)]
+    [TestCase(OrderStatus.Cancelled)]
+    public async Task Delete_RejectedOrCancelledOrder_ByAdmin_RemovesItWithoutTouchingStock(OrderStatus status)
+    {
+        var (orderId, variantId) = await SeedOrderWithVariantAsync(_owner.UserId, status, quantity: 2, stock: 10);
+
+        using var response = await _admin.Client.DeleteAsync($"/api/orders/{orderId}");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+        using var lookup = await _admin.Client.GetAsync($"/api/orders/{orderId}");
+        Assert.That(lookup.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+        Assert.That(await TestDatabase.GetStockAsync(variantId), Is.EqualTo(10));
+    }
+
+    [Test]
+    public async Task UpdateQuantity_PendingOrder_ChangesQuantityWithoutTouchingStock()
+    {
+        var (orderId, variantId) = await SeedOrderWithVariantAsync(_owner.UserId, OrderStatus.Pending, quantity: 2, stock: 10);
+
+        using var response = await _owner.Client.PutAsJsonAsync(
+            $"/api/orders/{orderId}/quantity", new UpdateOrderQuantityDto { Quantity = 5 });
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That((await TestDatabase.GetOrderAsync(orderId)).Quantity, Is.EqualTo(5));
+        Assert.That(await TestDatabase.GetStockAsync(variantId), Is.EqualTo(10));
+    }
+
+    [Test]
+    public async Task UpdateQuantity_PendingOrder_MoreThanIsInStock_Returns409()
+    {
+        var (orderId, _) = await SeedOrderWithVariantAsync(_owner.UserId, OrderStatus.Pending, quantity: 2, stock: 4);
+
+        using var response = await _owner.Client.PutAsJsonAsync(
+            $"/api/orders/{orderId}/quantity", new UpdateOrderQuantityDto { Quantity = 5 });
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+        Assert.That((await TestDatabase.GetOrderAsync(orderId)).Quantity, Is.EqualTo(2));
+    }
+
+    [TestCase(5, 5)]
+    [TestCase(1, 9)]
+    public async Task UpdateQuantity_ConfirmedOrder_AdjustsStockByTheDifference(int newQuantity, int expectedStock)
+    {
+        // Confirmed with 2 units reserved, 8 left on the shelf.
+        var (orderId, variantId) = await SeedOrderWithVariantAsync(_owner.UserId, OrderStatus.Confirmed, quantity: 2, stock: 8);
+
+        using var response = await _owner.Client.PutAsJsonAsync(
+            $"/api/orders/{orderId}/quantity", new UpdateOrderQuantityDto { Quantity = newQuantity });
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(await TestDatabase.GetStockAsync(variantId), Is.EqualTo(expectedStock));
+    }
+
+    [Test]
+    public async Task UpdateQuantity_ConfirmedOrder_IncreaseBeyondStock_Returns409AndChangesNothing()
+    {
+        var (orderId, variantId) = await SeedOrderWithVariantAsync(_owner.UserId, OrderStatus.Confirmed, quantity: 2, stock: 1);
+
+        using var response = await _owner.Client.PutAsJsonAsync(
+            $"/api/orders/{orderId}/quantity", new UpdateOrderQuantityDto { Quantity = 5 });
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+        Assert.That((await TestDatabase.GetOrderAsync(orderId)).Quantity, Is.EqualTo(2));
+        Assert.That(await TestDatabase.GetStockAsync(variantId), Is.EqualTo(1));
+    }
+
+    [TestCase(OrderStatus.Failed)]
+    [TestCase(OrderStatus.Cancelled)]
+    public async Task UpdateQuantity_RejectedOrCancelledOrder_Returns409(OrderStatus status)
+    {
+        var (orderId, variantId) = await SeedOrderWithVariantAsync(_owner.UserId, status, quantity: 2, stock: 10);
+
+        using var response = await _owner.Client.PutAsJsonAsync(
+            $"/api/orders/{orderId}/quantity", new UpdateOrderQuantityDto { Quantity = 3 });
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+        Assert.That(await TestDatabase.GetStockAsync(variantId), Is.EqualTo(10));
+    }
 }

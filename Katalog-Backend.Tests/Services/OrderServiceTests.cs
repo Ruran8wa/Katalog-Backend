@@ -242,42 +242,6 @@ public class OrderServiceTests
     }
 
     [Test]
-    public async Task UpdateOrderQuantityAsync_IncreaseQuantity_DeductsDifferenceFromStock()
-    {
-        var order = CreateDummyOrder(1, quantity: 2);
-        var variant = CreateDummyVariant(1, quantity: 10);
-
-        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
-        _variantRepositoryMock.Setup(r => r.GetByIdAsync(order.VariantId)).ReturnsAsync(variant);
-        _orderRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Order>())).ReturnsAsync(order);
-
-        var result = await _orderService.UpdateOrderQuantityAsync(1, 5, Owner);
-
-        Assert.That(order.Quantity, Is.EqualTo(5));
-        Assert.That(variant.Quantity, Is.EqualTo(7)); // 10 - (5 - 2) = 7
-        _variantRepositoryMock.Verify(r => r.UpdateAsync(It.Is<Variant>(v => v.Quantity == 7)), Times.Once);
-        _orderRepositoryMock.Verify(r => r.UpdateAsync(order), Times.Once);
-    }
-
-    [Test]
-    public async Task UpdateOrderQuantityAsync_DecreaseQuantity_RestoresDifferenceToStock()
-    {
-        var order = CreateDummyOrder(1, quantity: 5);
-        var variant = CreateDummyVariant(1, quantity: 10);
-
-        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
-        _variantRepositoryMock.Setup(r => r.GetByIdAsync(order.VariantId)).ReturnsAsync(variant);
-        _orderRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Order>())).ReturnsAsync(order);
-
-        var result = await _orderService.UpdateOrderQuantityAsync(1, 2, Owner);
-
-        Assert.That(order.Quantity, Is.EqualTo(2));
-        Assert.That(variant.Quantity, Is.EqualTo(13)); // 10 + (5 - 2) = 13
-        _variantRepositoryMock.Verify(r => r.UpdateAsync(It.Is<Variant>(v => v.Quantity == 13)), Times.Once);
-        _orderRepositoryMock.Verify(r => r.UpdateAsync(order), Times.Once);
-    }
-
-    [Test]
     public void UpdateOrderQuantityAsync_InsufficientStockForIncrease_ThrowsInsufficientStockException()
     {
         var order = CreateDummyOrder(1, quantity: 2);
@@ -287,7 +251,7 @@ public class OrderServiceTests
         _variantRepositoryMock.Setup(r => r.GetByIdAsync(order.VariantId)).ReturnsAsync(variant);
 
         Assert.ThrowsAsync<InsufficientStockException>(async () => await _orderService.UpdateOrderQuantityAsync(1, 5, Owner));
-        _variantRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Variant>()), Times.Never);
+        _orderRepositoryMock.Verify(r => r.SaveWithStockChangeAsync(It.IsAny<Order>(), It.IsAny<int>()), Times.Never);
     }
 
     [Test]
@@ -296,23 +260,6 @@ public class OrderServiceTests
         _orderRepositoryMock.Setup(r => r.GetByIdAsync(999)).ReturnsAsync((Order?)null);
 
         Assert.ThrowsAsync<OrderNotFoundException>(async () => await _orderService.UpdateOrderQuantityAsync(999, 3, Owner));
-    }
-
-    [Test]
-    public async Task DeleteOrderAsync_ExistingOrder_RestoresStockAndDeletesOrder()
-    {
-        var order = CreateDummyOrder(1, quantity: 3);
-        var variant = CreateDummyVariant(1, quantity: 7);
-
-        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
-        _variantRepositoryMock.Setup(r => r.GetByIdAsync(order.VariantId)).ReturnsAsync(variant);
-        _orderRepositoryMock.Setup(r => r.DeleteAsync(1)).ReturnsAsync(true);
-
-        await _orderService.DeleteOrderAsync(1, Owner);
-
-        Assert.That(variant.Quantity, Is.EqualTo(10)); // 7 + 3
-        _variantRepositoryMock.Verify(r => r.UpdateAsync(It.Is<Variant>(v => v.Quantity == 10)), Times.Once);
-        _orderRepositoryMock.Verify(r => r.DeleteAsync(1), Times.Once);
     }
 
     [Test]
@@ -380,6 +327,61 @@ public class OrderServiceTests
             ["cancelled_by"] = "admin",
             ["from_status"] = "confirmed"
         }));
+    }
+
+    [TestCase(2, 5, -3)]
+    [TestCase(5, 2, 3)]
+    public async Task UpdateOrderQuantityAsync_ConfirmedOrder_ChangesStockByTheDifference(int from, int to, int expectedStockChange)
+    {
+        var order = CreateDummyOrder(1, quantity: from);
+        order.Status = OrderStatus.Confirmed;
+        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
+        _orderRepositoryMock.Setup(r => r.SaveWithStockChangeAsync(order, It.IsAny<int>())).ReturnsAsync(order);
+
+        var result = await _orderService.UpdateOrderQuantityAsync(1, to, Owner);
+
+        Assert.That(result.Quantity, Is.EqualTo(to));
+        _orderRepositoryMock.Verify(r => r.SaveWithStockChangeAsync(order, expectedStockChange), Times.Once);
+    }
+
+    [Test]
+    public async Task UpdateOrderQuantityAsync_PendingOrder_ChangesNoStock()
+    {
+        var order = CreateDummyOrder(1, quantity: 2);
+        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
+        _variantRepositoryMock.Setup(r => r.GetByIdAsync(order.VariantId)).ReturnsAsync(CreateDummyVariant(1, quantity: 10));
+        _orderRepositoryMock.Setup(r => r.SaveWithStockChangeAsync(order, It.IsAny<int>())).ReturnsAsync(order);
+
+        await _orderService.UpdateOrderQuantityAsync(1, 5, Owner);
+
+        _orderRepositoryMock.Verify(r => r.SaveWithStockChangeAsync(order, 0), Times.Once);
+    }
+
+    [TestCase(OrderStatus.Failed)]
+    [TestCase(OrderStatus.Cancelled)]
+    public async Task DeleteOrderAsync_RejectedOrCancelledOrder_DeletesWithoutTouchingStock(OrderStatus status)
+    {
+        var order = CreateDummyOrder(1, quantity: 3);
+        order.Status = status;
+        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
+        _orderRepositoryMock.Setup(r => r.DeleteAsync(1)).ReturnsAsync(true);
+
+        await _orderService.DeleteOrderAsync(1, Owner);
+
+        _orderRepositoryMock.Verify(r => r.DeleteAsync(1), Times.Once);
+        _variantRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Variant>()), Times.Never);
+    }
+
+    [TestCase(OrderStatus.Pending)]
+    [TestCase(OrderStatus.Confirmed)]
+    public void DeleteOrderAsync_PendingOrConfirmedOrder_ThrowsAndDeletesNothing(OrderStatus status)
+    {
+        var order = CreateDummyOrder(1);
+        order.Status = status;
+        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
+
+        Assert.ThrowsAsync<OrderStatusConflictException>(() => _orderService.DeleteOrderAsync(1, Owner));
+        _orderRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<int>()), Times.Never);
     }
 
     [Test]

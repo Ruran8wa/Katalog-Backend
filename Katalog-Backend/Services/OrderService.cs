@@ -123,30 +123,29 @@ public class OrderService : IOrderService
 
         var order = await GetVisibleOrderAsync(id, requester);
 
-        var variant = await _variantRepository.GetByIdAsync(order.VariantId);
-        if (variant == null)
+        int stockChange;
+        switch (order.Status)
         {
-            throw new VariantNotFoundException(order.VariantId);
-        }
-
-        var diff = newQuantity - order.Quantity;
-        if (diff > 0)
-        {
-            if (variant.Quantity < diff)
-            {
-                throw new InsufficientStockException(variant.Id, diff, variant.Quantity);
-            }
-            variant.Quantity -= diff;
-            await _variantRepository.UpdateAsync(variant);
-        }
-        else if (diff < 0)
-        {
-            variant.Quantity += (-diff);
-            await _variantRepository.UpdateAsync(variant);
+            case OrderStatus.Pending:
+                // No stock is reserved yet: the consumer takes the order's quantity when it confirms it.
+                var variant = await _variantRepository.GetByIdAsync(order.VariantId)
+                              ?? throw new VariantNotFoundException(order.VariantId);
+                if (variant.Quantity < newQuantity)
+                {
+                    throw new InsufficientStockException(variant.Id, newQuantity, variant.Quantity);
+                }
+                stockChange = 0;
+                break;
+            case OrderStatus.Confirmed:
+                // Reserve or release only the difference.
+                stockChange = order.Quantity - newQuantity;
+                break;
+            default:
+                throw new OrderStatusConflictException(id, order.Status, OrderAction.ChangeQuantity);
         }
 
         order.Quantity = newQuantity;
-        var updated = await _orderRepository.UpdateAsync(order);
+        var updated = await _orderRepository.SaveWithStockChangeAsync(order, stockChange);
 
         return updated.ToDto();
     }
@@ -176,15 +175,13 @@ public class OrderService : IOrderService
         return cancelled.ToDto();
     }
 
+    // Deleting is an admin clean-up of orders that hold no stock; live orders must be cancelled first.
     public async Task DeleteOrderAsync(int id, OrderRequester requester)
     {
         var order = await GetVisibleOrderAsync(id, requester);
-
-        var variant = await _variantRepository.GetByIdAsync(order.VariantId);
-        if (variant != null)
+        if (order.Status is not (OrderStatus.Failed or OrderStatus.Cancelled))
         {
-            variant.Quantity += order.Quantity;
-            await _variantRepository.UpdateAsync(variant);
+            throw new OrderStatusConflictException(id, order.Status, OrderAction.Delete);
         }
 
         await _orderRepository.DeleteAsync(id);

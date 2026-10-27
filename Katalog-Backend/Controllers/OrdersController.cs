@@ -64,6 +64,7 @@ public class OrdersController : ControllerBase
         return Ok(cancelled);
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {
