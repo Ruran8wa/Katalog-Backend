@@ -24,7 +24,8 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Katalog_Backend.Observability;
 
-DotEnv.Load(options: new DotEnvOptions(probeForEnv: true, probeLevelsToSearch: 4));
+// Variables already set (shell, Compose, tests) take precedence over .env.
+DotEnv.Load(options: new DotEnvOptions(probeForEnv: true, probeLevelsToSearch: 4, overwriteExistingVars: false));
 
 var builder = WebApplication.CreateBuilder(args);
 var serviceName = builder.Configuration.GetValue<bool>("BackgroundServices:ConsumerEnabled")
