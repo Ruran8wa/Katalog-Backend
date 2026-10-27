@@ -4,6 +4,7 @@ using Katalog_Backend.Exceptions;
 using Katalog_Backend.Models;
 using Katalog_Backend.Repositories.Interfaces;
 using Katalog_Backend.Services;
+using Katalog_Backend.Services.Interfaces;
 using Katalog_Backend.Tests.Helpers;
 using Microsoft.AspNetCore.Identity;
 using Moq;
@@ -18,6 +19,8 @@ public class OrderServiceTests
     private Mock<IVariantRepository> _variantRepositoryMock;
     private Mock<UserManager<ApplicationUser>> _userManagerMock;
     private OrderService _orderService;
+
+    private static readonly OrderRequester Owner = new("user-1", IsAdmin: false);
 
     [SetUp]
     public void Setup()
@@ -115,7 +118,7 @@ public class OrderServiceTests
         var order = CreateDummyOrder(10);
         _orderRepositoryMock.Setup(r => r.GetByIdAsync(10)).ReturnsAsync(order);
 
-        var result = await _orderService.GetOrderByIdAsync(10);
+        var result = await _orderService.GetOrderByIdAsync(10, Owner);
 
         Assert.That(result, Is.Not.Null);
         Assert.That(result.Id, Is.EqualTo(10));
@@ -128,7 +131,7 @@ public class OrderServiceTests
     {
         _orderRepositoryMock.Setup(r => r.GetByIdAsync(999)).ReturnsAsync((Order?)null);
 
-        Assert.ThrowsAsync<OrderNotFoundException>(async () => await _orderService.GetOrderByIdAsync(999));
+        Assert.ThrowsAsync<OrderNotFoundException>(async () => await _orderService.GetOrderByIdAsync(999, Owner));
     }
 
     [Test]
@@ -244,7 +247,7 @@ public class OrderServiceTests
         _variantRepositoryMock.Setup(r => r.GetByIdAsync(order.VariantId)).ReturnsAsync(variant);
         _orderRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Order>())).ReturnsAsync(order);
 
-        var result = await _orderService.UpdateOrderQuantityAsync(1, 5);
+        var result = await _orderService.UpdateOrderQuantityAsync(1, 5, Owner);
 
         Assert.That(order.Quantity, Is.EqualTo(5));
         Assert.That(variant.Quantity, Is.EqualTo(7)); // 10 - (5 - 2) = 7
@@ -262,7 +265,7 @@ public class OrderServiceTests
         _variantRepositoryMock.Setup(r => r.GetByIdAsync(order.VariantId)).ReturnsAsync(variant);
         _orderRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Order>())).ReturnsAsync(order);
 
-        var result = await _orderService.UpdateOrderQuantityAsync(1, 2);
+        var result = await _orderService.UpdateOrderQuantityAsync(1, 2, Owner);
 
         Assert.That(order.Quantity, Is.EqualTo(2));
         Assert.That(variant.Quantity, Is.EqualTo(13)); // 10 + (5 - 2) = 13
@@ -279,7 +282,7 @@ public class OrderServiceTests
         _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
         _variantRepositoryMock.Setup(r => r.GetByIdAsync(order.VariantId)).ReturnsAsync(variant);
 
-        Assert.ThrowsAsync<InsufficientStockException>(async () => await _orderService.UpdateOrderQuantityAsync(1, 5));
+        Assert.ThrowsAsync<InsufficientStockException>(async () => await _orderService.UpdateOrderQuantityAsync(1, 5, Owner));
         _variantRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Variant>()), Times.Never);
     }
 
@@ -288,7 +291,7 @@ public class OrderServiceTests
     {
         _orderRepositoryMock.Setup(r => r.GetByIdAsync(999)).ReturnsAsync((Order?)null);
 
-        Assert.ThrowsAsync<OrderNotFoundException>(async () => await _orderService.UpdateOrderQuantityAsync(999, 3));
+        Assert.ThrowsAsync<OrderNotFoundException>(async () => await _orderService.UpdateOrderQuantityAsync(999, 3, Owner));
     }
 
     [Test]
@@ -301,7 +304,7 @@ public class OrderServiceTests
         _variantRepositoryMock.Setup(r => r.GetByIdAsync(order.VariantId)).ReturnsAsync(variant);
         _orderRepositoryMock.Setup(r => r.DeleteAsync(1)).ReturnsAsync(true);
 
-        await _orderService.DeleteOrderAsync(1);
+        await _orderService.DeleteOrderAsync(1, Owner);
 
         Assert.That(variant.Quantity, Is.EqualTo(10)); // 7 + 3
         _variantRepositoryMock.Verify(r => r.UpdateAsync(It.Is<Variant>(v => v.Quantity == 10)), Times.Once);
@@ -313,7 +316,27 @@ public class OrderServiceTests
     {
         _orderRepositoryMock.Setup(r => r.GetByIdAsync(999)).ReturnsAsync((Order?)null);
 
-        Assert.ThrowsAsync<OrderNotFoundException>(async () => await _orderService.DeleteOrderAsync(999));
+        Assert.ThrowsAsync<OrderNotFoundException>(async () => await _orderService.DeleteOrderAsync(999, Owner));
         _orderRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<int>()), Times.Never);
     }
+
+    [Test]
+    public void GetOrderByIdAsync_AnotherCustomersOrder_IsReportedAsMissing()
+    {
+        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(CreateDummyOrder(1, userId: "someone-else"));
+
+        Assert.ThrowsAsync<OrderNotFoundException>(() => _orderService.GetOrderByIdAsync(1, Owner));
+    }
+
+
+    [Test]
+    public async Task GetOrderByIdAsync_AdminCanReadAnyCustomersOrder()
+    {
+        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(CreateDummyOrder(1, userId: "someone-else"));
+
+        var result = await _orderService.GetOrderByIdAsync(1, new OrderRequester("admin-1", IsAdmin: true));
+
+        Assert.That(result.UserId, Is.EqualTo("someone-else"));
+    }
+
 }

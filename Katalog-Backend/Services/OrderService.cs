@@ -35,15 +35,22 @@ public class OrderService : IOrderService
         return orders.Select(o => o.ToDto());
     }
 
-    public async Task<OrderResponseDto> GetOrderByIdAsync(int id)
+    public async Task<OrderResponseDto> GetOrderByIdAsync(int id, OrderRequester requester)
+    {
+        var order = await GetVisibleOrderAsync(id, requester);
+        return order.ToDto();
+    }
+
+    // Another customer's order is reported as missing, so its existence is not revealed.
+    private async Task<Order> GetVisibleOrderAsync(int id, OrderRequester requester)
     {
         var order = await _orderRepository.GetByIdAsync(id);
-        if (order == null)
+        if (order == null || (!requester.IsAdmin && order.UserId != requester.UserId))
         {
             throw new OrderNotFoundException(id);
         }
 
-        return order.ToDto();
+        return order;
     }
 
     public async Task<OrderResponseDto> CreateOrderAsync(CreateOrderDto dto, string? currentUserId = null)
@@ -104,18 +111,14 @@ public class OrderService : IOrderService
         return created.ToDto();
     }
 
-    public async Task<OrderResponseDto> UpdateOrderQuantityAsync(int id, int newQuantity)
+    public async Task<OrderResponseDto> UpdateOrderQuantityAsync(int id, int newQuantity, OrderRequester requester)
     {
         if (newQuantity <= 0)
         {
             throw new ArgumentException("Quantity must be greater than 0.");
         }
 
-        var order = await _orderRepository.GetByIdAsync(id);
-        if (order == null)
-        {
-            throw new OrderNotFoundException(id);
-        }
+        var order = await GetVisibleOrderAsync(id, requester);
 
         var variant = await _variantRepository.GetByIdAsync(order.VariantId);
         if (variant == null)
@@ -145,13 +148,9 @@ public class OrderService : IOrderService
         return updated.ToDto();
     }
 
-    public async Task DeleteOrderAsync(int id)
+    public async Task DeleteOrderAsync(int id, OrderRequester requester)
     {
-        var order = await _orderRepository.GetByIdAsync(id);
-        if (order == null)
-        {
-            throw new OrderNotFoundException(id);
-        }
+        var order = await GetVisibleOrderAsync(id, requester);
 
         var variant = await _variantRepository.GetByIdAsync(order.VariantId);
         if (variant != null)
