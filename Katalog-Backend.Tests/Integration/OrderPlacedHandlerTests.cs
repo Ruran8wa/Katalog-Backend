@@ -4,6 +4,7 @@ using Katalog_Backend.Enums;
 using Katalog_Backend.Events;
 using Katalog_Backend.Models;
 using Katalog_Backend.Tests.Helpers;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 
@@ -96,5 +97,31 @@ public sealed class OrderPlacedHandlerTests
         Assert.That(results.Count(r => r.Outcome == OrderProcessingOutcome.Confirmed), Is.EqualTo(5));
         Assert.That(results.Count(r => r.Outcome == OrderProcessingOutcome.Rejected), Is.EqualTo(7));
         Assert.That(await TestDatabase.GetStockAsync(variant.Id), Is.EqualTo(0));
+    }
+
+    [Test]
+    public async Task OrderCancelledAfterTheConsumerReadIt_StaysCancelledAndKeepsItsStock()
+    {
+        var variant = await TestDatabase.SeedVariantAsync(quantity: 10);
+        var order = await TestDatabase.SeedOrderAsync(_userId, variant.Id, quantity: 3);
+
+        await using var consumerContext = TestDatabase.CreateContext();
+        // The consumer has already read the order as Pending...
+        await consumerContext.Orders.SingleAsync(o => o.Id == order.Id);
+        // ...when a cancellation is saved from another request.
+        await using (var apiContext = TestDatabase.CreateContext())
+        {
+            var cancelled = await apiContext.Orders.SingleAsync(o => o.Id == order.Id);
+            cancelled.Status = OrderStatus.Cancelled;
+            await apiContext.SaveChangesAsync();
+        }
+
+        var handler = new OrderPlacedHandler(consumerContext, NullLogger<OrderPlacedHandler>.Instance);
+        var result = await handler.HandleAsync(new OrderPlacedEvent(
+            order.Id, order.UserId, order.VariantId, order.Quantity, order.CreatedAt));
+
+        Assert.That(result.Outcome, Is.EqualTo(OrderProcessingOutcome.Skipped));
+        Assert.That((await TestDatabase.GetOrderAsync(order.Id)).Status, Is.EqualTo(OrderStatus.Cancelled));
+        Assert.That(await TestDatabase.GetStockAsync(variant.Id), Is.EqualTo(10));
     }
 }

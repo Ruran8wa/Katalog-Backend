@@ -30,9 +30,7 @@ public class OrderPlacedHandler : IOrderPlacedHandler
 
         try
         {
-            var strategy = _context.Database.CreateExecutionStrategy();
-            var result = await strategy.ExecuteAsync(
-                () => ProcessAsync(orderPlaced, stockActivity, cancellationToken));
+            var result = await ProcessWithConflictRetryAsync(orderPlaced, stockActivity, cancellationToken);
             stockActivity?.SetTag("order.outcome", result.Reason ?? "confirmed");
             return result;
         }
@@ -41,6 +39,33 @@ public class OrderPlacedHandler : IOrderPlacedHandler
             stockActivity?.SetTag("order.outcome", "error");
             stockActivity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             throw;
+        }
+    }
+
+    private async Task<OrderProcessingResult> ProcessWithConflictRetryAsync(
+        OrderPlacedEvent orderPlaced,
+        Activity? stockActivity,
+        CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 3;
+        var strategy = _context.Database.CreateExecutionStrategy();
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await strategy.ExecuteAsync(
+                    () => ProcessAsync(orderPlaced, stockActivity, cancellationToken));
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
+            {
+                // The order changed after it was read (cancelled, or its quantity edited).
+                // The transaction rolled back, including the stock decrement; re-read and decide again.
+                _logger.LogInformation(
+                    "Order {OrderId} changed while it was being processed. Retrying (attempt {Attempt}).",
+                    orderPlaced.OrderId,
+                    attempt + 1);
+                _context.ChangeTracker.Clear();
+            }
         }
     }
 
