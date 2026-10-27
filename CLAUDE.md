@@ -27,6 +27,8 @@ dotnet ef migrations add <Name> --project Katalog-Backend/Katalog-Backend.csproj
 2. `OutboxPublisherWorker` (consumer process) publishes outbox rows to the session-enabled `orders-queue` and propagates the trace context.
 3. `OrderStockDecrementConsumer` decrements stock in a transaction and sets the order to `Confirmed`, or sets it to `Failed` (insufficient stock / variant missing). It skips orders that are no longer `Pending`, which makes redelivery idempotent.
 
+Domain terms (Refused, Rejected, Cancelled…) are defined in `GLOSSARY.md`. Rejected maps to `OrderStatus.Failed` in code.
+
 Trace context must survive API → outbox → Service Bus → consumer (`TelemetryTests` asserts this). Metrics and the `ActivitySource` live in `Observability/Telemetry.cs`.
 
 ## Conventions
