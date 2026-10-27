@@ -25,5 +25,5 @@ A placed order that could not be confirmed for a business reason, such as stock 
 _Avoid_: Failed, refused
 
 **Cancelled**:
-A placed order that was deliberately withdrawn, as opposed to one that was rejected.
+A pending or confirmed order deliberately withdrawn by the customer who placed it or by an admin; any stock it had reserved is released.
 _Avoid_: Deleted, rejected
