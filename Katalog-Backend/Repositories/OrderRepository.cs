@@ -124,7 +124,14 @@ public class OrderRepository(ApplicationDbContext context) : IOrderRepository
         }
 
         context.Orders.Remove(order);
-        await context.SaveChangesAsync();
+        try
+        {
+            await context.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new OrderConcurrencyConflictException(id);
+        }
         return true;
     }
 

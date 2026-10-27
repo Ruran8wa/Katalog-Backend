@@ -95,4 +95,21 @@ public sealed class OrderConcurrencyTests
         Assert.That(stored.Status, Is.EqualTo(OrderStatus.Confirmed));
         Assert.That(await TestDatabase.GetStockAsync(variant.Id), Is.EqualTo(7));
     }
+
+    [Test]
+    public async Task TwoDeletesOfTheSameOrder_TheSecondConflictsInsteadOfFailing()
+    {
+        var variant = await TestDatabase.SeedVariantAsync(quantity: 10);
+        var seeded = await TestDatabase.SeedOrderAsync(_userId, variant.Id, quantity: 3, OrderStatus.Cancelled);
+
+        await using var firstContext = TestDatabase.CreateContext();
+        await using var secondContext = TestDatabase.CreateContext();
+        var first = new OrderRepository(firstContext);
+        var second = new OrderRepository(secondContext);
+        await first.GetByIdAsync(seeded.Id);
+        await second.GetByIdAsync(seeded.Id);
+
+        await first.DeleteAsync(seeded.Id);
+        Assert.ThrowsAsync<OrderConcurrencyConflictException>(() => second.DeleteAsync(seeded.Id));
+    }
 }
