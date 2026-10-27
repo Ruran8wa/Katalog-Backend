@@ -94,4 +94,90 @@ public sealed class OrdersApiTests
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
     }
+
+    private async Task<(int OrderId, int VariantId)> SeedOrderWithVariantAsync(
+        string userId, OrderStatus status, int quantity, int stock)
+    {
+        var variant = await TestDatabase.SeedVariantAsync(stock);
+        var order = await TestDatabase.SeedOrderAsync(userId, variant.Id, quantity, status);
+        return (order.Id, variant.Id);
+    }
+
+    [Test]
+    public async Task Cancel_OwnPendingOrder_CancelsItWithoutTouchingStock()
+    {
+        var (orderId, variantId) = await SeedOrderWithVariantAsync(_owner.UserId, OrderStatus.Pending, quantity: 2, stock: 10);
+
+        using var response = await _owner.Client.PostAsync($"/api/orders/{orderId}/cancel", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var order = await response.Content.ReadFromJsonAsync<OrderResponseDto>();
+        Assert.That(order!.Status, Is.EqualTo(OrderStatus.Cancelled));
+        Assert.That(await TestDatabase.GetStockAsync(variantId), Is.EqualTo(10));
+    }
+
+    [Test]
+    public async Task Cancel_OwnConfirmedOrder_ReleasesItsStock()
+    {
+        var (orderId, variantId) = await SeedOrderWithVariantAsync(_owner.UserId, OrderStatus.Confirmed, quantity: 3, stock: 7);
+
+        using var response = await _owner.Client.PostAsync($"/api/orders/{orderId}/cancel", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That((await TestDatabase.GetOrderAsync(orderId)).Status, Is.EqualTo(OrderStatus.Cancelled));
+        Assert.That(await TestDatabase.GetStockAsync(variantId), Is.EqualTo(10));
+    }
+
+    [Test]
+    public async Task Cancel_AnotherCustomersOrder_Returns404AndLeavesItAlone()
+    {
+        var (orderId, _) = await SeedOrderWithVariantAsync(_owner.UserId, OrderStatus.Pending, quantity: 2, stock: 10);
+
+        using var response = await _otherCustomer.Client.PostAsync($"/api/orders/{orderId}/cancel", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+        Assert.That((await TestDatabase.GetOrderAsync(orderId)).Status, Is.EqualTo(OrderStatus.Pending));
+    }
+
+    [Test]
+    public async Task Cancel_AdminCanCancelAnyCustomersOrder()
+    {
+        var (orderId, _) = await SeedOrderWithVariantAsync(_owner.UserId, OrderStatus.Pending, quantity: 2, stock: 10);
+
+        using var response = await _admin.Client.PostAsync($"/api/orders/{orderId}/cancel", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+    }
+
+    [TestCase(OrderStatus.Failed)]
+    [TestCase(OrderStatus.Cancelled)]
+    public async Task Cancel_RejectedOrAlreadyCancelledOrder_Returns409AndLeavesStockAlone(OrderStatus status)
+    {
+        var (orderId, variantId) = await SeedOrderWithVariantAsync(_owner.UserId, status, quantity: 2, stock: 10);
+
+        using var response = await _owner.Client.PostAsync($"/api/orders/{orderId}/cancel", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+        Assert.That((await TestDatabase.GetOrderAsync(orderId)).Status, Is.EqualTo(status));
+        Assert.That(await TestDatabase.GetStockAsync(variantId), Is.EqualTo(10));
+    }
+
+    [Test]
+    public async Task Cancel_MissingOrder_Returns404()
+    {
+        using var response = await _owner.Client.PostAsync("/api/orders/999999999/cancel", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+    }
+
+    [Test]
+    public async Task Cancel_NotLoggedIn_Returns401()
+    {
+        var (orderId, _) = await SeedOrderWithVariantAsync(_owner.UserId, OrderStatus.Pending, quantity: 2, stock: 10);
+        using var anonymous = _factory.CreateAnonymousClient();
+
+        using var response = await anonymous.PostAsync($"/api/orders/{orderId}/cancel", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+    }
 }

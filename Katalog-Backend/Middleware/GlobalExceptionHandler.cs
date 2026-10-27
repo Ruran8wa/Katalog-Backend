@@ -57,7 +57,9 @@ public class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger) : IE
             DuplicateSkuException
                 or DuplicateCollectionNameException
                 or ProductAlreadyInCollectionException
-                or InsufficientStockException => (StatusCodes.Status409Conflict, "Conflict"),
+                or InsufficientStockException
+                or OrderStatusConflictException
+                or OrderConcurrencyConflictException => (StatusCodes.Status409Conflict, "Conflict"),
 
             // 400 Bad Request
             RegistrationException

@@ -1,3 +1,5 @@
+using Katalog_Backend.Enums;
+
 namespace Katalog_Backend.Exceptions;
 
 public class OrderNotFoundException(int id)
@@ -8,3 +10,25 @@ public class InsufficientStockException(int variantId, int requested, int availa
 
 public class InvalidOrderOperationException(string message)
     : AppException(message);
+
+public enum OrderAction
+{
+    Cancel,
+    ChangeQuantity,
+    Delete
+}
+
+public class OrderStatusConflictException(int id, OrderStatus status, OrderAction action)
+    : AppException($"Order with ID {id} is {status.ToDomainName()} and {Describe(action)}.")
+{
+    private static string Describe(OrderAction action) => action switch
+    {
+        OrderAction.Cancel => "cannot be cancelled",
+        OrderAction.ChangeQuantity => "cannot be changed",
+        OrderAction.Delete => "cannot be deleted; cancel it first",
+        _ => throw new ArgumentOutOfRangeException(nameof(action), action, null)
+    };
+}
+
+public class OrderConcurrencyConflictException(int id)
+    : AppException($"Order with ID {id} was changed by another request. Reload it and try again.");

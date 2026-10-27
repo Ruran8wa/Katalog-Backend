@@ -18,4 +18,14 @@ public static class StockUpdates
                 cancellationToken);
         return updated == 1;
     }
+
+    public static Task ReleaseStockAsync(
+        this DbSet<Variant> variants, int variantId, int quantity, CancellationToken cancellationToken = default)
+    {
+        return variants
+            .Where(v => v.Id == variantId)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(v => v.Quantity, v => v.Quantity + quantity),
+                cancellationToken);
+    }
 }

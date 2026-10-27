@@ -18,15 +18,18 @@ public class OrderService : IOrderService
     private readonly IOrderRepository _orderRepository;
     private readonly IVariantRepository _variantRepository;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly ILogger<OrderService> _logger;
 
     public OrderService(
         IOrderRepository orderRepository,
         IVariantRepository variantRepository,
-        UserManager<ApplicationUser> userManager)
+        UserManager<ApplicationUser> userManager,
+        ILogger<OrderService> logger)
     {
         _orderRepository = orderRepository;
         _variantRepository = variantRepository;
         _userManager = userManager;
+        _logger = logger;
     }
 
     public async Task<IEnumerable<OrderResponseDto>> GetAllOrdersAsync(string? userId = null)
@@ -146,6 +149,31 @@ public class OrderService : IOrderService
         var updated = await _orderRepository.UpdateAsync(order);
 
         return updated.ToDto();
+    }
+
+    public async Task<OrderResponseDto> CancelOrderAsync(int id, OrderRequester requester)
+    {
+        var order = await GetVisibleOrderAsync(id, requester);
+        if (order.Status is not (OrderStatus.Pending or OrderStatus.Confirmed))
+        {
+            throw new OrderStatusConflictException(id, order.Status, OrderAction.Cancel);
+        }
+
+        // Only a confirmed order has reserved stock to release.
+        var fromStatus = order.Status;
+        var releasedStock = fromStatus == OrderStatus.Confirmed ? order.Quantity : 0;
+        order.Status = OrderStatus.Cancelled;
+        var cancelled = await _orderRepository.SaveWithStockChangeAsync(order, releasedStock);
+
+        var cancelledBy = requester.IsAdmin ? "admin" : "customer";
+        Telemetry.OrdersCancelled.Add(1, new TagList
+        {
+            { "cancelled_by", cancelledBy },
+            { "from_status", fromStatus.ToDomainName() }
+        });
+        _logger.LogInformation("Order {OrderId} cancelled by {CancelledBy}", order.Id, cancelledBy);
+
+        return cancelled.ToDto();
     }
 
     public async Task DeleteOrderAsync(int id, OrderRequester requester)

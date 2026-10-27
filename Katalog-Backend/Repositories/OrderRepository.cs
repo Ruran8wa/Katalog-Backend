@@ -1,4 +1,5 @@
 using Katalog_Backend.Data;
+using Katalog_Backend.Exceptions;
 using Katalog_Backend.Models;
 using Katalog_Backend.Repositories.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -85,6 +86,40 @@ public class OrderRepository(ApplicationDbContext context) : IOrderRepository
         context.Orders.Update(order);
         await context.SaveChangesAsync();
         return order;
+    }
+
+    public async Task<Order> SaveWithStockChangeAsync(Order order, int stockDelta)
+    {
+        var strategy = context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await context.Database.BeginTransactionAsync();
+
+            if (stockDelta > 0)
+            {
+                await context.Variants.ReleaseStockAsync(order.VariantId, stockDelta);
+            }
+            else if (stockDelta < 0 && !await context.Variants.TryTakeStockAsync(order.VariantId, -stockDelta))
+            {
+                var available = await context.Variants
+                    .Where(v => v.Id == order.VariantId)
+                    .Select(v => v.Quantity)
+                    .FirstOrDefaultAsync();
+                throw new InsufficientStockException(order.VariantId, -stockDelta, available);
+            }
+
+            try
+            {
+                await context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                throw new OrderConcurrencyConflictException(order.Id);
+            }
+
+            await transaction.CommitAsync();
+            return order;
+        });
     }
 
     public async Task<bool> DeleteAsync(int id)

@@ -57,6 +57,13 @@ public class OrdersController : ControllerBase
         return Ok(updated);
     }
 
+    [HttpPost("{id:int}/cancel")]
+    public async Task<ActionResult<OrderResponseDto>> Cancel(int id)
+    {
+        var cancelled = await _orderService.CancelOrderAsync(id, Requester);
+        return Ok(cancelled);
+    }
+
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {
