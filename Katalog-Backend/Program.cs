@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using dotenv.net;
 using Katalog_Backend.BackgroundServices;
+using Katalog_Backend.BackgroundServices.Interfaces;
 using Katalog_Backend.Configuration;
 using Katalog_Backend.Data;
 using Katalog_Backend.HealthChecks;
@@ -141,6 +142,7 @@ builder.Services.AddScoped<IFileStorageService, CloudinaryStorageService>();
 builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IOutboxRepository, OutboxRepository>();
+builder.Services.AddScoped<IOrderPlacedHandler, OrderPlacedHandler>();
 
 builder.Services.Configure<AzureServiceBusOptions>(builder.Configuration.GetSection(AzureServiceBusOptions.SectionName));
 var backgroundServiceOptions = builder.Configuration

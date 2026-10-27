@@ -1,12 +1,10 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
+using Katalog_Backend.BackgroundServices.Interfaces;
 using Katalog_Backend.Configuration;
-using Katalog_Backend.Data;
-using Katalog_Backend.Enums;
 using Katalog_Backend.Events;
 using Katalog_Backend.Observability;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Context.Propagation;
 
@@ -93,7 +91,6 @@ public class OrderStockDecrementConsumer : BackgroundService
                     ? new[] { value?.ToString() ?? string.Empty }
                     : Array.Empty<string>());
 
-        Activity? stockActivity = null;
         using var activity = Telemetry.ActivitySource.StartActivity(
             "servicebus process OrderPlaced",
             ActivityKind.Consumer,
@@ -119,114 +116,16 @@ public class OrderStockDecrementConsumer : BackgroundService
             }
 
             using var scope = _scopeFactory.CreateScope();
-            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            stockActivity = Telemetry.ActivitySource.StartActivity(
-                "order stock check and decrement",
-                ActivityKind.Internal);
-            stockActivity?.SetTag("order.id", orderPlacedEvent.OrderId);
-            var processingOutcome = "rejected";
-            var rejectionReason = "unknown";
-
-            var strategy = context.Database.CreateExecutionStrategy();
-            await strategy.ExecuteAsync(async () =>
-            {
-                using var transaction = await context.Database.BeginTransactionAsync();
-
-                var order = await context.Orders.FirstOrDefaultAsync(o => o.Id == orderPlacedEvent.OrderId);
-                if (order == null)
-                {
-                    stockActivity?.SetTag("order.outcome", "not_found");
-                    rejectionReason = "order_not_found";
-                    _logger.LogWarning("Order with ID {OrderId} not found. Skipping stock decrement.", orderPlacedEvent.OrderId);
-                    return;
-                }
-
-                // Idempotency: only process if the order is still Pending
-                if (order.Status != OrderStatus.Pending)
-                {
-                    stockActivity?.SetTag("order.outcome", "already_processed");
-                    rejectionReason = "already_processed";
-                    _logger.LogInformation("Order {OrderId} is already in state '{Status}'. Skipping duplicate processing.", order.Id, order.Status);
-                    return;
-                }
-
-                var variant = await context.Variants.FirstOrDefaultAsync(v => v.Id == orderPlacedEvent.VariantId);
-                if (variant == null)
-                {
-                    stockActivity?.SetTag("order.outcome", "variant_not_found");
-                    rejectionReason = "variant_not_found";
-                    _logger.LogWarning("Variant with ID {VariantId} not found for Order {OrderId}. Marking order as Failed.", orderPlacedEvent.VariantId, order.Id);
-                    order.Status = OrderStatus.Failed;
-                    await context.SaveChangesAsync();
-                    await transaction.CommitAsync();
-                    RecordProcessedOrder(order.CreatedAt, processingOutcome, rejectionReason);
-                    return;
-                }
-
-                if (variant.Quantity >= orderPlacedEvent.Quantity)
-                {
-                    variant.Quantity -= orderPlacedEvent.Quantity;
-                    order.Status = OrderStatus.Confirmed;
-                    await context.SaveChangesAsync();
-                    await transaction.CommitAsync();
-
-                    stockActivity?.SetTag("variant.sku", variant.Sku);
-                    stockActivity?.SetTag("order.outcome", "confirmed");
-                    processingOutcome = "confirmed";
-                    rejectionReason = "none";
-                    RecordProcessedOrder(order.CreatedAt, processingOutcome, rejectionReason);
-                    _logger.LogInformation(
-                        "Stock decremented by {Quantity} for Variant {VariantId}. Order {OrderId} confirmed. Remaining stock: {RemainingStock}",
-                        orderPlacedEvent.Quantity,
-                        variant.Id,
-                        order.Id,
-                        variant.Quantity);
-                }
-                else
-                {
-                    // Race condition: another order took the remaining stock
-                    order.Status = OrderStatus.Failed;
-                    await context.SaveChangesAsync();
-                    await transaction.CommitAsync();
-
-                    stockActivity?.SetTag("variant.sku", variant.Sku);
-                    stockActivity?.SetTag("order.outcome", "insufficient_stock");
-                    rejectionReason = "insufficient_stock";
-                    RecordProcessedOrder(order.CreatedAt, processingOutcome, rejectionReason);
-                    _logger.LogWarning(
-                        "Insufficient stock for Variant {VariantId} during Order {OrderId} processing. Requested: {Requested}, Available: {Available}. Order marked as Failed.",
-                        variant.Id,
-                        order.Id,
-                        orderPlacedEvent.Quantity,
-                        variant.Quantity);
-                }
-            });
+            var handler = scope.ServiceProvider.GetRequiredService<IOrderPlacedHandler>();
+            await handler.HandleAsync(orderPlacedEvent, args.CancellationToken);
 
             await args.CompleteMessageAsync(args.Message);
         }
         catch (Exception ex)
         {
-            stockActivity?.SetTag("order.outcome", "error");
-            stockActivity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             _logger.LogError(ex, "Error processing Azure Service Bus message {MessageId}. Message will be abandoned.", args.Message.MessageId);
             await args.AbandonMessageAsync(args.Message);
         }
-        finally
-        {
-            stockActivity?.Dispose();
-        }
-    }
-
-    private static void RecordProcessedOrder(DateTime createdAt, string outcome, string rejectionReason)
-    {
-        var tags = new TagList
-        {
-            { "outcome", outcome },
-            { "rejection.reason", rejectionReason }
-        };
-        Telemetry.OrdersProcessed.Add(1, tags);
-        Telemetry.OrderProcessingDuration.Record(
-            Math.Max(0, (DateTime.UtcNow - createdAt.ToUniversalTime()).TotalMilliseconds));
     }
 
     private Task HandleErrorAsync(ProcessErrorEventArgs args)
