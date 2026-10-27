@@ -44,6 +44,18 @@ public sealed class OrderPlacedHandlerTests
     }
 
     [Test]
+    public async Task QuantityChangedWhilePending_TakesTheOrdersCurrentQuantityNotTheMessages()
+    {
+        var variant = await TestDatabase.SeedVariantAsync(quantity: 10);
+        var order = await TestDatabase.SeedOrderAsync(_userId, variant.Id, quantity: 5);
+
+        var result = await HandleAsync(order, eventQuantity: 2);
+
+        Assert.That(result.Outcome, Is.EqualTo(OrderProcessingOutcome.Confirmed));
+        Assert.That(await TestDatabase.GetStockAsync(variant.Id), Is.EqualTo(5));
+    }
+
+    [Test]
     public async Task CancelledOrder_IsSkippedAndKeepsItsStatus()
     {
         var variant = await TestDatabase.SeedVariantAsync(quantity: 10);
@@ -67,5 +79,22 @@ public sealed class OrderPlacedHandlerTests
         Assert.That(result, Is.EqualTo(new OrderProcessingResult(OrderProcessingOutcome.Rejected, "insufficient_stock")));
         Assert.That((await TestDatabase.GetOrderAsync(order.Id)).Status, Is.EqualTo(OrderStatus.Failed));
         Assert.That(await TestDatabase.GetStockAsync(variant.Id), Is.EqualTo(2));
+    }
+
+    [Test]
+    public async Task ManyOrdersForTheSameVariantAtOnce_NeverOversell()
+    {
+        var variant = await TestDatabase.SeedVariantAsync(quantity: 5);
+        var orders = new List<Order>();
+        for (var i = 0; i < 12; i++)
+        {
+            orders.Add(await TestDatabase.SeedOrderAsync(_userId, variant.Id, quantity: 1));
+        }
+
+        var results = await Task.WhenAll(orders.Select(order => HandleAsync(order)));
+
+        Assert.That(results.Count(r => r.Outcome == OrderProcessingOutcome.Confirmed), Is.EqualTo(5));
+        Assert.That(results.Count(r => r.Outcome == OrderProcessingOutcome.Rejected), Is.EqualTo(7));
+        Assert.That(await TestDatabase.GetStockAsync(variant.Id), Is.EqualTo(0));
     }
 }

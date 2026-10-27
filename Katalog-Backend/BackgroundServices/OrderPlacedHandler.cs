@@ -65,43 +65,46 @@ public class OrderPlacedHandler : IOrderPlacedHandler
             return new OrderProcessingResult(OrderProcessingOutcome.Skipped, "already_processed");
         }
 
-        var variant = await _context.Variants.FirstOrDefaultAsync(v => v.Id == orderPlaced.VariantId, cancellationToken);
-        if (variant == null)
-        {
-            _logger.LogWarning("Variant with ID {VariantId} not found for Order {OrderId}. Order rejected.", orderPlaced.VariantId, order.Id);
-            order.Status = OrderStatus.Failed;
-            await _context.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-            return Processed(order.CreatedAt, order.Status, "variant_not_found");
-        }
+        // Take the quantity from the order row: it may have changed since the message was queued.
+        var quantity = order.Quantity;
+        var stockTaken = await _context.Variants.TryTakeStockAsync(order.VariantId, quantity, cancellationToken);
 
-        stockActivity?.SetTag("variant.sku", variant.Sku);
-        if (variant.Quantity >= orderPlaced.Quantity)
+        var variant = await _context.Variants
+            .Where(v => v.Id == order.VariantId)
+            .Select(v => new { v.Sku, v.Quantity })
+            .FirstOrDefaultAsync(cancellationToken);
+        stockActivity?.SetTag("variant.sku", variant?.Sku);
+
+        if (stockTaken)
         {
-            variant.Quantity -= orderPlaced.Quantity;
             order.Status = OrderStatus.Confirmed;
             await _context.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
             _logger.LogInformation(
                 "Stock decremented by {Quantity} for Variant {VariantId}. Order {OrderId} confirmed. Remaining stock: {RemainingStock}",
-                orderPlaced.Quantity,
-                variant.Id,
+                quantity,
+                order.VariantId,
                 order.Id,
-                variant.Quantity);
+                variant?.Quantity);
             return Processed(order.CreatedAt, order.Status, rejectionReason: null);
         }
 
-        // Race condition: another order took the remaining stock
         order.Status = OrderStatus.Failed;
         await _context.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
+        if (variant == null)
+        {
+            _logger.LogWarning("Variant with ID {VariantId} not found for Order {OrderId}. Order rejected.", order.VariantId, order.Id);
+            return Processed(order.CreatedAt, order.Status, "variant_not_found");
+        }
+
         _logger.LogWarning(
             "Insufficient stock for Variant {VariantId} during Order {OrderId} processing. Requested: {Requested}, Available: {Available}. Order rejected.",
-            variant.Id,
+            order.VariantId,
             order.Id,
-            orderPlaced.Quantity,
+            quantity,
             variant.Quantity);
         return Processed(order.CreatedAt, order.Status, "insufficient_stock");
     }
