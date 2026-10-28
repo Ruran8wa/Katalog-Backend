@@ -30,5 +30,8 @@ public class OrderStatusConflictException(int id, OrderStatus status, OrderActio
     };
 }
 
+public class OrderActionForbiddenException(string message)
+    : AppException(message);
+
 public class OrderConcurrencyConflictException(int id)
     : AppException($"Order with ID {id} was changed by another request. Reload it and try again.");

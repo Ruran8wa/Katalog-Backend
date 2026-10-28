@@ -71,6 +71,9 @@ public class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger) : IE
             // 401 Unauthorized
             InvalidCredentialsException      => (StatusCodes.Status401Unauthorized, "Unauthorized"),
 
+            // 403 Forbidden
+            OrderActionForbiddenException    => (StatusCodes.Status403Forbidden, "Forbidden"),
+
             // 423 Locked
             AccountLockedException           => (StatusCodes.Status423Locked, "Account Locked"),
 

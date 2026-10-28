@@ -24,6 +24,7 @@ public class OrderServiceTests
     private OrderService _orderService;
 
     private static readonly OrderRequester Owner = new("user-1", IsAdmin: false);
+    private static readonly OrderRequester Admin = new("admin-1", IsAdmin: true);
 
     [SetUp]
     public void Setup()
@@ -280,7 +281,7 @@ public class OrderServiceTests
         _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
         _orderRepositoryMock.Setup(r => r.SaveWithStockChangeAsync(order, It.IsAny<int>())).ReturnsAsync(order);
 
-        var result = await _orderService.CancelOrderAsync(1, Owner);
+        var result = await _orderService.CancelOrderAsync(1, Admin);
 
         Assert.That(result.Status, Is.EqualTo(OrderStatus.Cancelled));
         _orderRepositoryMock.Verify(r => r.SaveWithStockChangeAsync(order, expectedRelease), Times.Once);
@@ -408,6 +409,18 @@ public class OrderServiceTests
         _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(CreateDummyOrder(1, userId: "someone-else"));
 
         Assert.ThrowsAsync<OrderNotFoundException>(() => _orderService.CancelOrderAsync(1, Owner));
+        _orderRepositoryMock.Verify(r => r.SaveWithStockChangeAsync(It.IsAny<Order>(), It.IsAny<int>()), Times.Never);
+    }
+
+    [Test]
+    public void CancelOrderAsync_CustomersOwnConfirmedOrder_IsForbiddenAndSavesNothing()
+    {
+        var order = CreateDummyOrder(1, quantity: 3);
+        order.Status = OrderStatus.Confirmed;
+        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
+
+        var ex = Assert.ThrowsAsync<OrderActionForbiddenException>(() => _orderService.CancelOrderAsync(1, Owner));
+        Assert.That(ex!.Message, Does.Contain("can't cancel a confirmed order"));
         _orderRepositoryMock.Verify(r => r.SaveWithStockChangeAsync(It.IsAny<Order>(), It.IsAny<int>()), Times.Never);
     }
 }

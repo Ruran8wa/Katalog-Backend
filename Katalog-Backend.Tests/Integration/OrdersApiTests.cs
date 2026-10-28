@@ -117,11 +117,24 @@ public sealed class OrdersApiTests
     }
 
     [Test]
-    public async Task Cancel_OwnConfirmedOrder_ReleasesItsStock()
+    public async Task Cancel_CustomersOwnConfirmedOrder_Returns403AndKeepsIt()
     {
         var (orderId, variantId) = await SeedOrderWithVariantAsync(_owner.UserId, OrderStatus.Confirmed, quantity: 3, stock: 7);
 
         using var response = await _owner.Client.PostAsync($"/api/orders/{orderId}/cancel", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+        Assert.That(await response.Content.ReadAsStringAsync(), Does.Contain("can't cancel a confirmed order"));
+        Assert.That((await TestDatabase.GetOrderAsync(orderId)).Status, Is.EqualTo(OrderStatus.Confirmed));
+        Assert.That(await TestDatabase.GetStockAsync(variantId), Is.EqualTo(7));
+    }
+
+    [Test]
+    public async Task Cancel_AdminCancelsAConfirmedOrder_ReleasingItsStock()
+    {
+        var (orderId, variantId) = await SeedOrderWithVariantAsync(_owner.UserId, OrderStatus.Confirmed, quantity: 3, stock: 7);
+
+        using var response = await _admin.Client.PostAsync($"/api/orders/{orderId}/cancel", null);
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         Assert.That((await TestDatabase.GetOrderAsync(orderId)).Status, Is.EqualTo(OrderStatus.Cancelled));

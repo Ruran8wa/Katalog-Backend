@@ -158,6 +158,11 @@ public class OrderService : IOrderService
             throw new OrderStatusConflictException(id, order.Status, OrderAction.Cancel);
         }
 
+        if (order.Status == OrderStatus.Confirmed && !requester.IsAdmin)
+        {
+            throw new OrderActionForbiddenException("You can't cancel a confirmed order.");
+        }
+
         // Only a confirmed order has reserved stock to release.
         var fromStatus = order.Status;
         var releasedStock = fromStatus == OrderStatus.Confirmed ? order.Quantity : 0;
