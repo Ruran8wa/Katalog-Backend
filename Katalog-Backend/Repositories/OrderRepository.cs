@@ -115,24 +115,30 @@ public class OrderRepository(ApplicationDbContext context) : IOrderRepository
         });
     }
 
-    public async Task<bool> DeleteAsync(int id)
+    public async Task DeleteAsync(Order order, int releasedStock)
     {
-        var order = await context.Orders.FindAsync(id);
-        if (order == null)
+        var strategy = context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
-            return false;
-        }
+            await using var transaction = await context.Database.BeginTransactionAsync();
 
-        context.Orders.Remove(order);
-        try
-        {
-            await context.SaveChangesAsync();
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            throw new OrderConcurrencyConflictException(id);
-        }
-        return true;
+            if (releasedStock > 0)
+            {
+                await context.Variants.ReleaseStockAsync(order.VariantId, releasedStock);
+            }
+
+            context.Orders.Remove(order);
+            try
+            {
+                await context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                throw new OrderConcurrencyConflictException(order.Id);
+            }
+
+            await transaction.CommitAsync();
+        });
     }
 
     public async Task<bool> ExistsAsync(int id)

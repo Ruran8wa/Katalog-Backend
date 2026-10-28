@@ -204,22 +204,11 @@ public sealed class OrdersApiTests
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
     }
 
-    [TestCase(OrderStatus.Pending)]
-    [TestCase(OrderStatus.Confirmed)]
-    public async Task Delete_PendingOrConfirmedOrder_Returns409AndKeepsIt(OrderStatus status)
-    {
-        var (orderId, variantId) = await SeedOrderWithVariantAsync(_owner.UserId, status, quantity: 2, stock: 10);
-
-        using var response = await _admin.Client.DeleteAsync($"/api/orders/{orderId}");
-
-        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
-        Assert.That((await TestDatabase.GetOrderAsync(orderId)).Status, Is.EqualTo(status));
-        Assert.That(await TestDatabase.GetStockAsync(variantId), Is.EqualTo(10));
-    }
-
-    [TestCase(OrderStatus.Failed)]
-    [TestCase(OrderStatus.Cancelled)]
-    public async Task Delete_RejectedOrCancelledOrder_ByAdmin_RemovesItWithoutTouchingStock(OrderStatus status)
+    [TestCase(OrderStatus.Pending, 10)]
+    [TestCase(OrderStatus.Confirmed, 12)]
+    [TestCase(OrderStatus.Failed, 10)]
+    [TestCase(OrderStatus.Cancelled, 10)]
+    public async Task Delete_ByAdmin_RemovesAnOrderInAnyStatus_ReleasingOnlyReservedStock(OrderStatus status, int expectedStock)
     {
         var (orderId, variantId) = await SeedOrderWithVariantAsync(_owner.UserId, status, quantity: 2, stock: 10);
 
@@ -228,7 +217,7 @@ public sealed class OrdersApiTests
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
         using var lookup = await _admin.Client.GetAsync($"/api/orders/{orderId}");
         Assert.That(lookup.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
-        Assert.That(await TestDatabase.GetStockAsync(variantId), Is.EqualTo(10));
+        Assert.That(await TestDatabase.GetStockAsync(variantId), Is.EqualTo(expectedStock));
     }
 
     [Test]

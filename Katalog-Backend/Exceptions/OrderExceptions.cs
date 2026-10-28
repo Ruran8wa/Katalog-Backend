@@ -14,8 +14,7 @@ public class InvalidOrderOperationException(string message)
 public enum OrderAction
 {
     Cancel,
-    ChangeQuantity,
-    Delete
+    ChangeQuantity
 }
 
 public class OrderStatusConflictException(int id, OrderStatus status, OrderAction action)
@@ -25,7 +24,6 @@ public class OrderStatusConflictException(int id, OrderStatus status, OrderActio
     {
         OrderAction.Cancel => "cannot be cancelled",
         OrderAction.ChangeQuantity => "cannot be changed",
-        OrderAction.Delete => "cannot be deleted; cancel it first",
         _ => throw new ArgumentOutOfRangeException(nameof(action), action, null)
     };
 }

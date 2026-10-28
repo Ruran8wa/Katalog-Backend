@@ -180,15 +180,15 @@ public class OrderService : IOrderService
         return cancelled.ToDto();
     }
 
-    // Deleting is an admin clean-up of orders that hold no stock; live orders must be cancelled first.
+    // Admins may delete an order in any status; a confirmed order's reserved stock is released.
     public async Task DeleteOrderAsync(int id, OrderRequester requester)
     {
         var order = await GetVisibleOrderAsync(id, requester);
-        if (order.Status is not (OrderStatus.Failed or OrderStatus.Cancelled))
-        {
-            throw new OrderStatusConflictException(id, order.Status, OrderAction.Delete);
-        }
+        var fromStatus = order.Status;
+        var releasedStock = fromStatus == OrderStatus.Confirmed ? order.Quantity : 0;
+        await _orderRepository.DeleteAsync(order, releasedStock);
 
-        await _orderRepository.DeleteAsync(id);
+        Telemetry.OrdersDeleted.Add(1, new TagList { { "from_status", fromStatus.ToDomainName() } });
+        _logger.LogInformation("Order {OrderId} deleted by admin from status {FromStatus}", order.Id, fromStatus.ToDomainName());
     }
 }

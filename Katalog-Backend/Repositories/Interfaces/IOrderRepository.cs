@@ -12,6 +12,8 @@ public interface IOrderRepository
     // Throws InsufficientStockException if a negative delta exceeds the stock, and
     // OrderConcurrencyConflictException if the order changed since it was read.
     Task<Order> SaveWithStockChangeAsync(Order order, int stockDelta);
-    Task<bool> DeleteAsync(int id);
+    // Deletes a tracked order and releases releasedStock to its variant in one transaction.
+    // Throws OrderConcurrencyConflictException if the order changed since it was read.
+    Task DeleteAsync(Order order, int releasedStock);
     Task<bool> ExistsAsync(int id);
 }

@@ -269,7 +269,7 @@ public class OrderServiceTests
         _orderRepositoryMock.Setup(r => r.GetByIdAsync(999)).ReturnsAsync((Order?)null);
 
         Assert.ThrowsAsync<OrderNotFoundException>(async () => await _orderService.DeleteOrderAsync(999, Owner));
-        _orderRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<int>()), Times.Never);
+        _orderRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<Order>(), It.IsAny<int>()), Times.Never);
     }
 
     [TestCase(OrderStatus.Pending, 0)]
@@ -358,33 +358,6 @@ public class OrderServiceTests
         _orderRepositoryMock.Verify(r => r.SaveWithStockChangeAsync(order, 0), Times.Once);
     }
 
-    [TestCase(OrderStatus.Failed)]
-    [TestCase(OrderStatus.Cancelled)]
-    public async Task DeleteOrderAsync_RejectedOrCancelledOrder_DeletesWithoutTouchingStock(OrderStatus status)
-    {
-        var order = CreateDummyOrder(1, quantity: 3);
-        order.Status = status;
-        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
-        _orderRepositoryMock.Setup(r => r.DeleteAsync(1)).ReturnsAsync(true);
-
-        await _orderService.DeleteOrderAsync(1, Owner);
-
-        _orderRepositoryMock.Verify(r => r.DeleteAsync(1), Times.Once);
-        _variantRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Variant>()), Times.Never);
-    }
-
-    [TestCase(OrderStatus.Pending)]
-    [TestCase(OrderStatus.Confirmed)]
-    public void DeleteOrderAsync_PendingOrConfirmedOrder_ThrowsAndDeletesNothing(OrderStatus status)
-    {
-        var order = CreateDummyOrder(1);
-        order.Status = status;
-        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
-
-        Assert.ThrowsAsync<OrderStatusConflictException>(() => _orderService.DeleteOrderAsync(1, Owner));
-        _orderRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<int>()), Times.Never);
-    }
-
     [Test]
     public void GetOrderByIdAsync_AnotherCustomersOrder_IsReportedAsMissing()
     {
@@ -422,5 +395,46 @@ public class OrderServiceTests
         var ex = Assert.ThrowsAsync<OrderActionForbiddenException>(() => _orderService.CancelOrderAsync(1, Owner));
         Assert.That(ex!.Message, Does.Contain("can't cancel a confirmed order"));
         _orderRepositoryMock.Verify(r => r.SaveWithStockChangeAsync(It.IsAny<Order>(), It.IsAny<int>()), Times.Never);
+    }
+
+    [TestCase(OrderStatus.Pending, 0)]
+    [TestCase(OrderStatus.Confirmed, 3)]
+    [TestCase(OrderStatus.Failed, 0)]
+    [TestCase(OrderStatus.Cancelled, 0)]
+    public async Task DeleteOrderAsync_AnyStatus_ReleasesOnlyReservedStock(OrderStatus status, int expectedRelease)
+    {
+        var order = CreateDummyOrder(1, quantity: 3);
+        order.Status = status;
+        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
+
+        await _orderService.DeleteOrderAsync(1, Admin);
+
+        _orderRepositoryMock.Verify(r => r.DeleteAsync(order, expectedRelease), Times.Once);
+    }
+
+    [Test]
+    public async Task DeleteOrderAsync_CountsTheDeletionByTheStatusItWasIn()
+    {
+        var order = CreateDummyOrder(1, quantity: 3);
+        order.Status = OrderStatus.Confirmed;
+        _orderRepositoryMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(order);
+
+        var measurements = new List<Dictionary<string, object?>>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument == Telemetry.OrdersDeleted)
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+            measurements.Add(tags.ToArray().ToDictionary(tag => tag.Key, tag => tag.Value)));
+        listener.Start();
+
+        await _orderService.DeleteOrderAsync(1, Admin);
+
+        Assert.That(measurements, Has.Count.EqualTo(1));
+        Assert.That(measurements[0], Is.EquivalentTo(new Dictionary<string, object?> { ["from_status"] = "confirmed" }));
     }
 }
