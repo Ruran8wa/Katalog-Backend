@@ -26,6 +26,7 @@ public sealed class KatalogApiFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("BackgroundServices__ConsumerEnabled", "false");
         Environment.SetEnvironmentVariable("BackgroundServices__OutboxPublisherEnabled", "false");
         Environment.SetEnvironmentVariable("Seeding__Enabled", "true");
+        Environment.SetEnvironmentVariable("Jwt__Key", "katalog-tests-signing-key-at-least-32-bytes-long!");
 
         TestDatabase.EnsureMigrated();
         return new KatalogApiFactory();
