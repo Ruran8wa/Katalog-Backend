@@ -27,6 +27,12 @@ public static class Telemetry
     public static readonly Counter<long> OrdersProcessed =
         Meter.CreateCounter<long>("katalog.orders.processed", unit: "{order}", description: "Orders processed to a final status.");
 
+    public static readonly Counter<long> OrdersCancelled =
+        Meter.CreateCounter<long>("katalog.orders.cancelled", unit: "{order}", description: "Orders cancelled by a customer or an admin.");
+
+    public static readonly Counter<long> OrdersDeleted =
+        Meter.CreateCounter<long>("katalog.orders.deleted", unit: "{order}", description: "Orders deleted by an admin.");
+
     public static readonly Histogram<double> OrderProcessingDuration =
         Meter.CreateHistogram<double>(
             "katalog.orders.processing.duration",

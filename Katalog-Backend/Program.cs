@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using dotenv.net;
 using Katalog_Backend.BackgroundServices;
+using Katalog_Backend.BackgroundServices.Interfaces;
 using Katalog_Backend.Configuration;
 using Katalog_Backend.Data;
 using Katalog_Backend.HealthChecks;
@@ -24,7 +25,8 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Katalog_Backend.Observability;
 
-DotEnv.Load(options: new DotEnvOptions(probeForEnv: true, probeLevelsToSearch: 4));
+// Variables already set (shell, Compose, tests) take precedence over .env.
+DotEnv.Load(options: new DotEnvOptions(probeForEnv: true, probeLevelsToSearch: 4, overwriteExistingVars: false));
 
 var builder = WebApplication.CreateBuilder(args);
 var serviceName = builder.Configuration.GetValue<bool>("BackgroundServices:ConsumerEnabled")
@@ -140,6 +142,7 @@ builder.Services.AddScoped<IFileStorageService, CloudinaryStorageService>();
 builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IOutboxRepository, OutboxRepository>();
+builder.Services.AddScoped<IOrderPlacedHandler, OrderPlacedHandler>();
 
 builder.Services.Configure<AzureServiceBusOptions>(builder.Configuration.GetSection(AzureServiceBusOptions.SectionName));
 var backgroundServiceOptions = builder.Configuration

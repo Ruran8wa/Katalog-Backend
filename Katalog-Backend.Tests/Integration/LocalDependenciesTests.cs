@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Katalog_Backend.Data;
+using Katalog_Backend.Tests.Helpers;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,10 +19,7 @@ public sealed class LocalDependenciesTests
     [OneTimeSetUp]
     public void SetUp()
     {
-        Environment.SetEnvironmentVariable(
-            "ConnectionStrings__DefaultConnection",
-            Environment.GetEnvironmentVariable("CI_DATABASE_CONNECTION_STRING")
-            ?? "Server=localhost,1433;Database=KatalogDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=True;");
+        Environment.SetEnvironmentVariable("ConnectionStrings__DefaultConnection", TestDatabase.ConnectionString);
         Environment.SetEnvironmentVariable(
             "AzureServiceBus__ConnectionString",
             Environment.GetEnvironmentVariable("CI_SERVICE_BUS_CONNECTION_STRING")
