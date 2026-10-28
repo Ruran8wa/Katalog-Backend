@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Katalog observability
+    orgId: 1
+    folder: Katalog
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards

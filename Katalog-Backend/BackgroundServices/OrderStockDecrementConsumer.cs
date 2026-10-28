@@ -1,11 +1,12 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
+using Katalog_Backend.BackgroundServices.Interfaces;
 using Katalog_Backend.Configuration;
-using Katalog_Backend.Data;
-using Katalog_Backend.Enums;
 using Katalog_Backend.Events;
-using Microsoft.EntityFrameworkCore;
+using Katalog_Backend.Observability;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Context.Propagation;
 
 namespace Katalog_Backend.BackgroundServices;
 
@@ -82,10 +83,26 @@ public class OrderStockDecrementConsumer : BackgroundService
     private async Task HandleMessageAsync(ProcessSessionMessageEventArgs args)
     {
         var body = args.Message.Body.ToString();
-        _logger.LogInformation("Received message with ID: {MessageId}, Subject: {Subject}", args.Message.MessageId, args.Message.Subject);
+        var parentContext = Propagators.DefaultTextMapPropagator.Extract(
+            default,
+            args.Message.ApplicationProperties,
+            static (properties, key) =>
+                properties.TryGetValue(key, out var value)
+                    ? new[] { value?.ToString() ?? string.Empty }
+                    : Array.Empty<string>());
 
+        using var activity = Telemetry.ActivitySource.StartActivity(
+            "servicebus process OrderPlaced",
+            ActivityKind.Consumer,
+            parentContext.ActivityContext);
+        activity?.SetTag("messaging.system", "azure_service_bus");
+        activity?.SetTag("messaging.destination.name", _options.QueueName);
+        activity?.SetTag("messaging.message.id", args.Message.MessageId);
+        using var traceScope = Telemetry.BeginTraceScope(_logger);
         try
         {
+            _logger.LogInformation("Received message with ID: {MessageId}, Subject: {Subject}", args.Message.MessageId, args.Message.Subject);
+
             var orderPlacedEvent = JsonSerializer.Deserialize<OrderPlacedEvent>(body, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
@@ -99,66 +116,8 @@ public class OrderStockDecrementConsumer : BackgroundService
             }
 
             using var scope = _scopeFactory.CreateScope();
-            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
-            var strategy = context.Database.CreateExecutionStrategy();
-            await strategy.ExecuteAsync(async () =>
-            {
-                using var transaction = await context.Database.BeginTransactionAsync();
-
-                var order = await context.Orders.FirstOrDefaultAsync(o => o.Id == orderPlacedEvent.OrderId);
-                if (order == null)
-                {
-                    _logger.LogWarning("Order with ID {OrderId} not found. Skipping stock decrement.", orderPlacedEvent.OrderId);
-                    return;
-                }
-
-                // Idempotency: only process if the order is still Pending
-                if (order.Status != OrderStatus.Pending)
-                {
-                    _logger.LogInformation("Order {OrderId} is already in state '{Status}'. Skipping duplicate processing.", order.Id, order.Status);
-                    return;
-                }
-
-                var variant = await context.Variants.FirstOrDefaultAsync(v => v.Id == orderPlacedEvent.VariantId);
-                if (variant == null)
-                {
-                    _logger.LogWarning("Variant with ID {VariantId} not found for Order {OrderId}. Marking order as Failed.", orderPlacedEvent.VariantId, order.Id);
-                    order.Status = OrderStatus.Failed;
-                    await context.SaveChangesAsync();
-                    await transaction.CommitAsync();
-                    return;
-                }
-
-                if (variant.Quantity >= orderPlacedEvent.Quantity)
-                {
-                    variant.Quantity -= orderPlacedEvent.Quantity;
-                    order.Status = OrderStatus.Confirmed;
-                    await context.SaveChangesAsync();
-                    await transaction.CommitAsync();
-
-                    _logger.LogInformation(
-                        "Stock decremented by {Quantity} for Variant {VariantId}. Order {OrderId} confirmed. Remaining stock: {RemainingStock}",
-                        orderPlacedEvent.Quantity,
-                        variant.Id,
-                        order.Id,
-                        variant.Quantity);
-                }
-                else
-                {
-                    // Race condition: another order took the remaining stock
-                    order.Status = OrderStatus.Failed;
-                    await context.SaveChangesAsync();
-                    await transaction.CommitAsync();
-
-                    _logger.LogWarning(
-                        "Insufficient stock for Variant {VariantId} during Order {OrderId} processing. Requested: {Requested}, Available: {Available}. Order marked as Failed.",
-                        variant.Id,
-                        order.Id,
-                        orderPlacedEvent.Quantity,
-                        variant.Quantity);
-                }
-            });
+            var handler = scope.ServiceProvider.GetRequiredService<IOrderPlacedHandler>();
+            await handler.HandleAsync(orderPlacedEvent, args.CancellationToken);
 
             await args.CompleteMessageAsync(args.Message);
         }
@@ -171,6 +130,10 @@ public class OrderStockDecrementConsumer : BackgroundService
 
     private Task HandleErrorAsync(ProcessErrorEventArgs args)
     {
+        using var activity = Telemetry.ActivitySource.StartActivity(
+            "servicebus process error",
+            ActivityKind.Consumer);
+        using var traceScope = Telemetry.BeginTraceScope(_logger);
         _logger.LogError(args.Exception, "Azure Service Bus processor encountered an error. Source: {ErrorSource}, Entity: {EntityPath}",
             args.ErrorSource,
             args.EntityPath);

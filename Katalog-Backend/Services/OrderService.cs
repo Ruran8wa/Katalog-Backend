@@ -1,10 +1,12 @@
 using System.Text.Json;
+using System.Diagnostics;
 using Katalog_Backend.DTO;
 using Katalog_Backend.Enums;
 using Katalog_Backend.Events;
 using Katalog_Backend.Exceptions;
 using Katalog_Backend.Mappers;
 using Katalog_Backend.Models;
+using Katalog_Backend.Observability;
 using Katalog_Backend.Repositories.Interfaces;
 using Katalog_Backend.Services.Interfaces;
 using Microsoft.AspNetCore.Identity;
@@ -16,15 +18,18 @@ public class OrderService : IOrderService
     private readonly IOrderRepository _orderRepository;
     private readonly IVariantRepository _variantRepository;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly ILogger<OrderService> _logger;
 
     public OrderService(
         IOrderRepository orderRepository,
         IVariantRepository variantRepository,
-        UserManager<ApplicationUser> userManager)
+        UserManager<ApplicationUser> userManager,
+        ILogger<OrderService> logger)
     {
         _orderRepository = orderRepository;
         _variantRepository = variantRepository;
         _userManager = userManager;
+        _logger = logger;
     }
 
     public async Task<IEnumerable<OrderResponseDto>> GetAllOrdersAsync(string? userId = null)
@@ -33,15 +38,22 @@ public class OrderService : IOrderService
         return orders.Select(o => o.ToDto());
     }
 
-    public async Task<OrderResponseDto> GetOrderByIdAsync(int id)
+    public async Task<OrderResponseDto> GetOrderByIdAsync(int id, OrderRequester requester)
+    {
+        var order = await GetVisibleOrderAsync(id, requester);
+        return order.ToDto();
+    }
+
+    // Another customer's order is reported as missing, so its existence is not revealed.
+    private async Task<Order> GetVisibleOrderAsync(int id, OrderRequester requester)
     {
         var order = await _orderRepository.GetByIdAsync(id);
-        if (order == null)
+        if (order == null || (!requester.IsAdmin && order.UserId != requester.UserId))
         {
             throw new OrderNotFoundException(id);
         }
 
-        return order.ToDto();
+        return order;
     }
 
     public async Task<OrderResponseDto> CreateOrderAsync(CreateOrderDto dto, string? currentUserId = null)
@@ -93,69 +105,90 @@ public class OrderService : IOrderService
             {
                 EventType = nameof(OrderPlacedEvent),
                 Payload = JsonSerializer.Serialize(@event),
-                SessionId = savedOrder.Id.ToString()
+                SessionId = savedOrder.Id.ToString(),
+                TraceParent = Activity.Current?.Id
             };
         });
 
+        Telemetry.OrdersPlaced.Add(1);
         return created.ToDto();
     }
 
-    public async Task<OrderResponseDto> UpdateOrderQuantityAsync(int id, int newQuantity)
+    public async Task<OrderResponseDto> UpdateOrderQuantityAsync(int id, int newQuantity, OrderRequester requester)
     {
         if (newQuantity <= 0)
         {
             throw new ArgumentException("Quantity must be greater than 0.");
         }
 
-        var order = await _orderRepository.GetByIdAsync(id);
-        if (order == null)
-        {
-            throw new OrderNotFoundException(id);
-        }
+        var order = await GetVisibleOrderAsync(id, requester);
 
-        var variant = await _variantRepository.GetByIdAsync(order.VariantId);
-        if (variant == null)
+        int stockChange;
+        switch (order.Status)
         {
-            throw new VariantNotFoundException(order.VariantId);
-        }
-
-        var diff = newQuantity - order.Quantity;
-        if (diff > 0)
-        {
-            if (variant.Quantity < diff)
-            {
-                throw new InsufficientStockException(variant.Id, diff, variant.Quantity);
-            }
-            variant.Quantity -= diff;
-            await _variantRepository.UpdateAsync(variant);
-        }
-        else if (diff < 0)
-        {
-            variant.Quantity += (-diff);
-            await _variantRepository.UpdateAsync(variant);
+            case OrderStatus.Pending:
+                // No stock is reserved yet: the consumer takes the order's quantity when it confirms it.
+                var variant = await _variantRepository.GetByIdAsync(order.VariantId)
+                              ?? throw new VariantNotFoundException(order.VariantId);
+                if (variant.Quantity < newQuantity)
+                {
+                    throw new InsufficientStockException(variant.Id, newQuantity, variant.Quantity);
+                }
+                stockChange = 0;
+                break;
+            case OrderStatus.Confirmed:
+                // Reserve or release only the difference.
+                stockChange = order.Quantity - newQuantity;
+                break;
+            default:
+                throw new OrderStatusConflictException(id, order.Status, OrderAction.ChangeQuantity);
         }
 
         order.Quantity = newQuantity;
-        var updated = await _orderRepository.UpdateAsync(order);
+        var updated = await _orderRepository.SaveWithStockChangeAsync(order, stockChange);
 
         return updated.ToDto();
     }
 
-    public async Task DeleteOrderAsync(int id)
+    public async Task<OrderResponseDto> CancelOrderAsync(int id, OrderRequester requester)
     {
-        var order = await _orderRepository.GetByIdAsync(id);
-        if (order == null)
+        var order = await GetVisibleOrderAsync(id, requester);
+        if (order.Status is not (OrderStatus.Pending or OrderStatus.Confirmed))
         {
-            throw new OrderNotFoundException(id);
+            throw new OrderStatusConflictException(id, order.Status, OrderAction.Cancel);
         }
 
-        var variant = await _variantRepository.GetByIdAsync(order.VariantId);
-        if (variant != null)
+        if (order.Status == OrderStatus.Confirmed && !requester.IsAdmin)
         {
-            variant.Quantity += order.Quantity;
-            await _variantRepository.UpdateAsync(variant);
+            throw new OrderActionForbiddenException("You can't cancel a confirmed order.");
         }
 
-        await _orderRepository.DeleteAsync(id);
+        // Only a confirmed order has reserved stock to release.
+        var fromStatus = order.Status;
+        var releasedStock = fromStatus == OrderStatus.Confirmed ? order.Quantity : 0;
+        order.Status = OrderStatus.Cancelled;
+        var cancelled = await _orderRepository.SaveWithStockChangeAsync(order, releasedStock);
+
+        var cancelledBy = requester.IsAdmin ? "admin" : "customer";
+        Telemetry.OrdersCancelled.Add(1, new TagList
+        {
+            { "cancelled_by", cancelledBy },
+            { "from_status", fromStatus.ToDomainName() }
+        });
+        _logger.LogInformation("Order {OrderId} cancelled by {CancelledBy}", order.Id, cancelledBy);
+
+        return cancelled.ToDto();
+    }
+
+    // Admins may delete an order in any status; a confirmed order's reserved stock is released.
+    public async Task DeleteOrderAsync(int id, OrderRequester requester)
+    {
+        var order = await GetVisibleOrderAsync(id, requester);
+        var fromStatus = order.Status;
+        var releasedStock = fromStatus == OrderStatus.Confirmed ? order.Quantity : 0;
+        await _orderRepository.DeleteAsync(order, releasedStock);
+
+        Telemetry.OrdersDeleted.Add(1, new TagList { { "from_status", fromStatus.ToDomainName() } });
+        _logger.LogInformation("Order {OrderId} deleted by admin from status {FromStatus}", order.Id, fromStatus.ToDomainName());
     }
 }

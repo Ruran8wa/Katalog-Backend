@@ -1,12 +1,12 @@
 using System.Security.Claims;
 using Katalog_Backend.DTO;
-using Katalog_Backend.Exceptions;
 using Katalog_Backend.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Katalog_Backend.Controllers;
 
+// Domain exceptions are mapped to status codes by GlobalExceptionHandler.
 [Authorize]
 [ApiController]
 [Route("api/[controller]")]
@@ -19,12 +19,16 @@ public class OrdersController : ControllerBase
         _orderService = orderService;
     }
 
+    private string CurrentUserId => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+
+    private bool IsAdmin => User.IsInRole("Admin");
+
+    private OrderRequester Requester => new(CurrentUserId, IsAdmin);
+
     [HttpGet]
     public async Task<ActionResult<IEnumerable<OrderResponseDto>>> GetAll([FromQuery] string? userId)
     {
-        var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        var isAdmin = User.IsInRole("Admin");
-        var effectiveUserId = isAdmin ? userId : currentUserId;
+        var effectiveUserId = IsAdmin ? userId : CurrentUserId;
 
         var orders = await _orderService.GetAllOrdersAsync(effectiveUserId);
         return Ok(orders);
@@ -33,114 +37,38 @@ public class OrdersController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<OrderResponseDto>> GetById(int id)
     {
-        try
-        {
-            var order = await _orderService.GetOrderByIdAsync(id);
-            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!User.IsInRole("Admin") && order.UserId != currentUserId)
-            {
-                return Forbid();
-            }
-
-            return Ok(order);
-        }
-        catch (OrderNotFoundException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
+        var order = await _orderService.GetOrderByIdAsync(id, Requester);
+        return Ok(order);
     }
 
     [HttpPost]
     public async Task<ActionResult<OrderResponseDto>> Create([FromBody] CreateOrderDto dto)
     {
-        if (!ModelState.IsValid)
-        {
-            return BadRequest(ModelState);
-        }
+        var effectiveUserId = IsAdmin && !string.IsNullOrWhiteSpace(dto.UserId) ? dto.UserId : CurrentUserId;
 
-        try
-        {
-            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            var isAdmin = User.IsInRole("Admin");
-            var effectiveUserId = isAdmin && !string.IsNullOrWhiteSpace(dto.UserId) ? dto.UserId : currentUserId;
-
-            var order = await _orderService.CreateOrderAsync(dto, effectiveUserId);
-            return AcceptedAtAction(nameof(GetById), new { id = order.Id }, order);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (VariantNotFoundException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (InsufficientStockException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
+        var order = await _orderService.CreateOrderAsync(dto, effectiveUserId);
+        return AcceptedAtAction(nameof(GetById), new { id = order.Id }, order);
     }
 
     [HttpPut("{id:int}/quantity")]
     public async Task<ActionResult<OrderResponseDto>> UpdateQuantity(int id, [FromBody] UpdateOrderQuantityDto dto)
     {
-        if (!ModelState.IsValid)
-        {
-            return BadRequest(ModelState);
-        }
-
-        try
-        {
-            var existing = await _orderService.GetOrderByIdAsync(id);
-            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!User.IsInRole("Admin") && existing.UserId != currentUserId)
-            {
-                return Forbid();
-            }
-
-            var updated = await _orderService.UpdateOrderQuantityAsync(id, dto.Quantity);
-            return Ok(updated);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-        catch (OrderNotFoundException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (VariantNotFoundException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (InsufficientStockException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
+        var updated = await _orderService.UpdateOrderQuantityAsync(id, dto.Quantity, Requester);
+        return Ok(updated);
     }
 
+    [HttpPost("{id:int}/cancel")]
+    public async Task<ActionResult<OrderResponseDto>> Cancel(int id)
+    {
+        var cancelled = await _orderService.CancelOrderAsync(id, Requester);
+        return Ok(cancelled);
+    }
+
+    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {
-        try
-        {
-            var existing = await _orderService.GetOrderByIdAsync(id);
-            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!User.IsInRole("Admin") && existing.UserId != currentUserId)
-            {
-                return Forbid();
-            }
-
-            await _orderService.DeleteOrderAsync(id);
-            return NoContent();
-        }
-        catch (OrderNotFoundException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
+        await _orderService.DeleteOrderAsync(id, Requester);
+        return NoContent();
     }
 }
